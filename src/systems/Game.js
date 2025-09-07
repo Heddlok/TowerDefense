@@ -6,6 +6,7 @@ import { SoundManager } from '../audio/SoundManager.js';
 import { ObjectPool } from '../utils/ObjectPool.js';
 import { SpatialGrid } from '../utils/SpatialGrid.js';
 import { PerformanceMonitor } from '../utils/PerformanceMonitor.js';
+import { getWavePlan, getWaveScaling } from './Difficulty.js';
 
 export class Game {
   constructor(canvas, ctx) {
@@ -221,33 +222,64 @@ export class Game {
 
   startWave() {
     if (this.gameOver) return;
+  
+    // Enter combat + advance wave counter
     this.phase = 'combat';
     this.wave += 1;
     this.soundManager.playWaveStart();
-    const count = 6 + this.wave * 2;
-    let i = 0;
+  
+    // Pull difficulty knobs for this wave
+    const scaling = getWaveScaling(this.wave);   // { hpMul, rewardMul, speedMul }
+    const plan    = getWavePlan(this.wave);      // { count, interval (sec), weights, burstBonus? }
+  
+    // Total enemies this wave (optionally add a small "pressure spike")
+    const totalToSpawn = plan.count + (plan.burstBonus || 0);
+  
+    let spawned = 0;
     this.spawning = true;
-    const spawn = () => {
-      if (this.gameOver) { this.spawning = false; return; }
-      if (i >= count) { this.spawning = false; return; }
-      
-      // Spawn different enemy types based on wave
-      let enemyType = 'basic';
-      if (this.wave >= 3) {
-        const rand = Math.random();
-        if (rand < 0.3) enemyType = 'fast';
-        else if (rand < 0.5) enemyType = 'tank';
-      } else if (this.wave >= 2) {
-        if (Math.random() < 0.2) enemyType = 'fast';
-      }
-      
-      const enemy = this.enemyPool.get();
-      enemy.init(enemyType);
-      this.enemies.push(enemy);
-      i++;
-      setTimeout(spawn, 600);
+  
+    // Weighted type picker (basic / fast / tank)
+    const pickType = () => {
+      const w = plan.weights || { basic: 1, fast: 0, tank: 0 };
+      const a = Math.max(0, w.basic || 0);
+      const b = Math.max(0, w.fast  || 0);
+      const c = Math.max(0, w.tank  || 0);
+      const sum = a + b + c || 1;
+      const r = Math.random() * sum;
+      return (r < a) ? 'basic' : (r < a + b) ? 'fast' : 'tank';
     };
-    spawn();
+  
+    const spawnOne = () => {
+      if (this.gameOver) { this.spawning = false; return; }
+      if (spawned >= totalToSpawn) { this.spawning = false; return; }
+  
+      // Acquire a pooled enemy, init with type, then apply wave scaling
+      const type = pickType();
+      const enemy = this.enemyPool.get();
+      enemy.init(type, scaling);
+  
+      // Apply per-wave scaling (kept here so Enemy.js can stay unchanged)
+      if (typeof enemy.maxHp === 'number') {
+        enemy.maxHp = Math.max(1, Math.round(enemy.maxHp * (scaling.hpMul || 1)));
+        enemy.hp = enemy.maxHp;
+      }
+      if (typeof enemy.speed === 'number') {
+        enemy.speed = enemy.speed * (scaling.speedMul || 1);
+      }
+      if (typeof enemy.reward === 'number') {
+        enemy.reward = Math.max(1, Math.round(enemy.reward * (scaling.rewardMul || 1)));
+      }
+  
+      this.enemies.push(enemy);
+      spawned++;
+  
+      // Spawn pacing: gentle shrink with light jitter, but never too fast
+      const jitter = (Math.random() * 0.12) - 0.06; // ±0.06s
+      const intervalSec = Math.max(0.10, (plan.interval || 1.0) + jitter);
+      setTimeout(spawnOne, intervalSec * 1000);
+    };
+  
+    spawnOne();
   }
 
   selectTower(type) { 

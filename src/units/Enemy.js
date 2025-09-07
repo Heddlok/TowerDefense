@@ -3,7 +3,7 @@ import { TILE_SIZE } from '../world/map.js';
 export class Enemy {
   constructor(type = 'basic') {
     this.type = type;
-    
+
     // Enemy stats based on type
     const stats = this.getEnemyStats(type);
     this.speed = stats.speed;
@@ -12,36 +12,48 @@ export class Enemy {
     this.maxHp = stats.maxHp;
     this.hp = this.maxHp;
     this.reward = stats.reward;
-    
+
     this.progress = 0; // along path segments
     this.isDead = false;
     this.reachedEnd = false;
     this.x = 0;
     this.y = 0;
-    
+
     // Pathfinding cache for performance
     this._segments = null;
     this._sIndex = 0;
     this._sProgress = 0;
   }
 
-  // Initialize enemy with specific type (for object pooling)
-  init(type = 'basic') {
+  /**
+   * Initialize enemy with specific type and optional per-wave scaling.
+   * @param {('basic'|'fast'|'tank')} type
+   * @param {{hpMul?:number, speedMul?:number, rewardMul?:number}} [scaling]
+   */
+  init(type = 'basic', scaling = { hpMul: 1, speedMul: 1, rewardMul: 1 }) {
     this.type = type;
     const stats = this.getEnemyStats(type);
-    this.speed = stats.speed;
+
+    // Apply per-wave scaling (defaults keep original behavior)
+    const hpMul = Number.isFinite(scaling.hpMul) ? scaling.hpMul : 1;
+    const spMul = Number.isFinite(scaling.speedMul) ? scaling.speedMul : 1;
+    const rwMul = Number.isFinite(scaling.rewardMul) ? scaling.rewardMul : 1;
+
+    this.speed = stats.speed * spMul;
     this.radius = stats.radius;
     this.color = stats.color;
-    this.maxHp = stats.maxHp;
-    this.hp = stats.maxHp;
-    this.reward = stats.reward;
-    
+
+    // Round hp/reward to ints, never below 1
+    this.maxHp = Math.max(1, Math.round(stats.maxHp * hpMul));
+    this.hp = this.maxHp;
+    this.reward = Math.max(1, Math.round(stats.reward * rwMul));
+
     this.progress = 0;
     this.isDead = false;
     this.reachedEnd = false;
     this.x = 0;
     this.y = 0;
-    
+
     // Reset pathfinding cache
     this._segments = null;
     this._sIndex = 0;
@@ -84,11 +96,10 @@ export class Enemy {
 
   update(dt, path) {
     if (this.isDead || this.reachedEnd) return;
-    // Move along path nodes linearly by dt * speed
-    // Compute total path length in pixels lazily
+
+    // Build path segments lazily
     if (!this._segments) {
       this._segments = [];
-      let total = 0;
       for (let i = 0; i < path.length - 1; i++) {
         const a = path[i];
         const b = path[i + 1];
@@ -101,7 +112,6 @@ export class Enemy {
         const len = Math.hypot(dx, dy);
         this._segments.push({ ax, ay, bx, by, len, dx, dy });
       }
-      this._totalLen = total;
       this._sIndex = 0;
       this._sProgress = 0;
       if (this._segments.length) {
@@ -110,6 +120,7 @@ export class Enemy {
       }
     }
 
+    // Advance along segments
     let remaining = this.speed * dt;
     while (remaining > 0 && this._sIndex < this._segments.length) {
       const s = this._segments[this._sIndex];
@@ -138,20 +149,20 @@ export class Enemy {
     g.fillStyle = '#2ea043';
     const w = Math.max(0, 28 * (this.hp / this.maxHp));
     g.fillRect(this.x - 14, this.y - 20, w, 4);
-    
+
     // body
     g.beginPath();
     g.fillStyle = this.color;
     g.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     g.fill();
-    
+
     // outline
     g.strokeStyle = '#ffffff';
     g.lineWidth = 1;
     g.beginPath();
     g.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     g.stroke();
-    
+
     // type indicator
     g.fillStyle = '#ffffff';
     g.font = 'bold 10px system-ui';
@@ -159,5 +170,3 @@ export class Enemy {
     g.fillText(this.type.charAt(0).toUpperCase(), this.x, this.y + 3);
   }
 }
-
-
