@@ -14,7 +14,7 @@ function growthRate(wave, low, high, center=CENTER_WAVE, k=TRANSITION_SHARPNESS)
 /** Returns multipliers for this wave (apply to base stats). */
 export function getWaveScaling(wave) {
   // Early waves grow ~6% hp/kill reward, later ~12%. Speed grows slowly and caps.
-  const hpRate      = growthRate(wave, 0.06, 0.12);
+  const hpRate      = growthRate(wave, 0.08, 0.15);
   const rewardRate  = growthRate(wave, 0.04, 0.07);
   const hpMul       = Math.pow(1 + hpRate, Math.max(0, wave - 1));
   const rewardMul   = Math.pow(1 + rewardRate, Math.max(0, wave - 1)) * Math.pow(0.97, Math.floor(wave / 10));
