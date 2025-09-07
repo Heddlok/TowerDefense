@@ -19,10 +19,10 @@ export class Enemy {
     this.x = 0;
     this.y = 0;
 
-    // NEW: grant-money-once flag (persists per enemy lifetime)
+    // Pay-once flag (prevents reward glitches)
     this._rewardGranted = false;
 
-    // Generation token (helps ignore stale hits after pooling reuse)
+    // Generation token (can help ignore stale hits after pooling reuse)
     this._gen = (Enemy._nextGen = (Enemy._nextGen || 0) + 1);
 
     // Pathfinding cache for performance
@@ -60,7 +60,7 @@ export class Enemy {
     this.x = 0;
     this.y = 0;
 
-    // NEW: reset reward flag each reuse from the pool
+    // Reset per-lifetime flags
     this._rewardGranted = false;
 
     // New generation token each reuse from the pool
@@ -78,7 +78,7 @@ export class Enemy {
     this.reachedEnd = false;
     this.hp = 0;            // defensive: clearly "not alive" while idle in pool
     this._segments = null;
-    this._rewardGranted = false; // NEW: ensure clean when returned to pool
+    this._rewardGranted = false;
   }
 
   getEnemyStats(type) {
@@ -108,6 +108,19 @@ export class Enemy {
     return stats[type] || stats.basic;
   }
 
+  // --- HP sanitizer: clamps bad or tiny values to a clean death state ---
+  _sanitizeHpToLifeState() {
+    // If hp ever becomes NaN or tiny negative, kill immediately.
+    if (!Number.isFinite(this.hp) || this.hp <= 1e-6) {
+      this.hp = 0;
+      this.isDead = true;
+      return true; // became dead
+    }
+    // Clamp over-heal (just in case)
+    if (this.hp > this.maxHp) this.hp = this.maxHp;
+    return false;
+  }
+
   /**
    * Safe damage application to avoid NaN/float edge-cases and double-rewards.
    * @param {number} dmg
@@ -120,17 +133,16 @@ export class Enemy {
 
     this.hp -= amount;
 
-    // Use small epsilon to avoid lingering -0.0000001 style cases
-    if (this.hp <= 1e-6) {
-      this.hp = 0;
-      this.isDead = true;
-      return true;
-    }
+    // Kill on bad/low hp deterministically
+    if (this._sanitizeHpToLifeState()) return true;
     return false;
   }
 
   update(dt, path) {
     if (this.isDead || this.reachedEnd) return;
+
+    // If hp got corrupted between frames, mark dead now.
+    if (this._sanitizeHpToLifeState()) return;
 
     // Build path segments lazily
     if (!this._segments) {
