@@ -4,7 +4,7 @@ A polished HTML5 Canvas tower defense game with multiple tower types, enemy vari
 
 ## 🎮 Live Demo
 
-**[Play the Game](https://yourusername.github.io/TowerDefense/)**
+**[Play the Game](https://heddlok.github.io/TowerDefense/)**
 
 ## ✨ Features
 
@@ -21,7 +21,7 @@ A polished HTML5 Canvas tower defense game with multiple tower types, enemy vari
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/TowerDefense.git
+   git clone https://github.com/Heddlok/TowerDefense.git
    cd TowerDefense
    ```
 
