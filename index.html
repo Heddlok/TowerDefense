@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tower Defense - Portfolio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Tower Defense</h1>
+        <div class="stats">
+          <div>Lives: <span id="lives">20</span></div>
+          <div>Money: $<span id="money">100</span></div>
+          <div>Wave: <span id="wave">0</span></div>
+          <div>Next Wave In: <span id="planning">5.0s</span></div>
+          <div>FPS: <span id="fps">60</span></div>
+        </div>
+        <div class="controls">
+          <button id="sellModeBtn">Sell: Off</button>
+          <button id="upgradeModeBtn">Upgrade: Off</button>
+          <button id="soundToggleBtn">🔊 Sound</button>
+        </div>
+      </header>
+      <main>
+        <aside class="sidebar">
+          <h2>Towers</h2>
+          <button class="tower-btn" data-tower="basic">Basic ($50)</button>
+          <button class="tower-btn" data-tower="rapid">Rapid ($80)</button>
+          <button class="tower-btn" data-tower="heavy">Heavy ($120)</button>
+          
+          <div id="upgradePanel" class="upgrade-panel" style="display: none;">
+            <h3>Tower Upgrades</h3>
+            <div class="upgrade-stats">
+              <div>Damage: <span id="currentDamage">15</span></div>
+              <div>Range: <span id="currentRange">140</span></div>
+              <div>Fire Rate: <span id="currentFireRate">0.8</span></div>
+            </div>
+            <div class="upgrade-buttons">
+              <button id="upgradeDamageBtn" class="upgrade-btn">Damage ($<span id="damageCost">25</span>)</button>
+              <button id="upgradeRangeBtn" class="upgrade-btn">Range ($<span id="rangeCost">25</span>)</button>
+              <button id="upgradeFireRateBtn" class="upgrade-btn">Fire Rate ($<span id="fireRateCost">25</span>)</button>
+            </div>
+            <div class="upgrade-info">
+              <div>Sell Value: $<span id="sellValue">30</span></div>
+            </div>
+          </div>
+        </aside>
+        <section class="canvas-wrap">
+          <canvas id="game" width="960" height="640"></canvas>
+          <div id="hoverInfo"></div>
+        </section>
+      </main>
+      <footer>
+        <a href="https://github.com/" target="_blank" rel="noreferrer">Source on GitHub</a>
+      </footer>
+    </div>
+
+    <script type="module" src="src/main.js"></script>
+  </body>
+  </html>
+
+
