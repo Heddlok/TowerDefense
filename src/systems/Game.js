@@ -32,18 +32,18 @@ export class Game {
     this.upgradeMode = false;
     this.selectedTower = null;
     this.soundManager = new SoundManager();
-    
+
     // Performance optimizations
     this.perfMonitor = new PerformanceMonitor();
     this.spatialGrid = new SpatialGrid(canvas.width, canvas.height, TILE_SIZE);
-    
+
     // Object pools
     this.enemyPool = new ObjectPool(
       () => new Enemy(),
       (enemy) => enemy.reset(),
       20
     );
-    
+
     this.projectilePool = new ObjectPool(
       () => new Projectile(),
       (proj) => proj.reset(),
@@ -62,7 +62,7 @@ export class Game {
 
     // planning timer
     if (this.phase === 'planning') {
-      this.planningTime -= 1/60;
+      this.planningTime -= 1 / 60;
       if (this.planningTime <= 0) {
         this.startWave();
       }
@@ -85,8 +85,8 @@ export class Game {
     // update enemies with object pooling
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const enemy = this.enemies[i];
-      enemy.update(1/60, this.path);
-      
+      enemy.update(1 / 60, this.path);
+
       if (enemy.reachedEnd) {
         this.lives -= 1;
         enemy.isDead = true;
@@ -95,7 +95,7 @@ export class Game {
           this.soundManager.playGameOver();
         }
       }
-      
+
       if (enemy.isDead) {
         this.enemyPool.release(enemy);
         this.enemies.splice(i, 1);
@@ -104,7 +104,7 @@ export class Game {
 
     // towers acquire targets and shoot with spatial optimization
     for (const tower of this.towers) {
-      const shot = tower.update(1/60, this.enemies, this.projectiles, this.spatialGrid, this.projectilePool);
+      const shot = tower.update(1 / 60, this.enemies, this.projectiles, this.spatialGrid, this.projectilePool);
       if (shot) {
         this.soundManager.playShoot();
       }
@@ -113,30 +113,25 @@ export class Game {
     // projectiles with object pooling
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
-      p.update(1/60);
-      
+      p.update(1 / 60);
+
       if (p.hitTarget && p.target && !p.target.isDead && !p.target.reachedEnd) {
         const killed = (typeof p.target.takeDamage === 'function')
           ? p.target.takeDamage(p.damage)
           : ((p.target.hp -= (Number.isFinite(p.damage) ? Math.max(0, p.damage) : 0)),
-             (p.target.hp <= 1e-6 ? (p.target.hp = 0, p.target.isDead = true, true) : false));
-      
+            (p.target.hp <= 1e-6 ? (p.target.hp = 0, p.target.isDead = true, true) : false));
+
         if (killed && !p.target._rewardGranted) {
           this.money += Math.max(0, p.target.reward | 0);
           p.target._rewardGranted = true;
           this.soundManager.playEnemyDeath();
         }
-      
-        if (!p.done) p.done = true; // consume single-hit projectiles
+
+        // Single-hit projectile consumption
+        p.done = true;
       }
-      
-        }
-      
-        // If your projectile is meant to be single-hit, ensure it’s consumed:
-        if (!p.done) p.done = true;
-      }
-      
-      
+
+      // Return projectile to pool when finished
       if (p.done) {
         this.projectilePool.release(p);
         this.projectiles.splice(i, 1);
@@ -147,13 +142,13 @@ export class Game {
   render() {
     const g = this.ctx;
     const stats = this.perfMonitor.getStats();
-    
+
     // Adaptive quality scaling
     if (stats.renderScale < 1.0) {
       g.save();
       g.scale(stats.renderScale, stats.renderScale);
     }
-    
+
     g.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
     // grid
@@ -207,7 +202,7 @@ export class Game {
       g.fillText('Refresh the page to restart', this.canvas.width / 2, this.canvas.height / 2 + 24);
       g.restore();
     }
-    
+
     if (stats.renderScale < 1.0) {
       g.restore();
     }
@@ -219,14 +214,14 @@ export class Game {
     document.getElementById('wave').textContent = String(this.wave);
     document.getElementById('sellModeBtn').textContent = `Sell: ${this.sellMode ? 'On' : 'Off'}`;
     document.getElementById('upgradeModeBtn').textContent = `Upgrade: ${this.upgradeMode ? 'On' : 'Off'}`;
-    
+
     const planningEl = document.getElementById('planning');
     if (planningEl) planningEl.textContent = this.phase === 'planning' ? `${Math.max(0, this.planningTime).toFixed(1)}s` : '—';
-    
+
     // Performance stats
     const stats = this.perfMonitor.getStats();
     document.getElementById('fps').textContent = String(stats.fps);
-    
+
     const disable = this.gameOver === true;
     const sellBtn = document.getElementById('sellModeBtn');
     if (sellBtn) sellBtn.disabled = disable;
@@ -235,16 +230,16 @@ export class Game {
 
   startWave() {
     if (this.gameOver) return;
-  
+
     // Enter combat + advance wave counter
     this.phase = 'combat';
     this.wave += 1;
     this.soundManager.playWaveStart();
-  
+
     // Difficulty knobs for this wave
     const scaling = getWaveScaling(this.wave);   // { hpMul, rewardMul, speedMul }
     const plan    = getWavePlan(this.wave);      // { count, interval, burstBonus? }
-  
+
     // ---- ENEMY COMPOSITION RULES ----
     // Waves 1–3: ONLY basic enemies (no exceptions).
     // After that: gradually add fast first, then tanks a bit later.
@@ -254,17 +249,17 @@ export class Game {
     } else {
       const t = Math.max(0, this.wave - 3);                 // waves since "variety" unlocked
       let fastW = Math.min(0.40, 0.05 + 0.02 * t);          // ~5% at wave 4, +2%/wave → cap 40%
-      let tankW = Math.min(0.35, 0.015 * Math.max(0, t-2)); // starts ~wave 6, +1.5%/wave → cap 35%
+      let tankW = Math.min(0.35, 0.015 * Math.max(0, t - 2)); // starts ~wave 6, +1.5%/wave → cap 35%
       let basicW = Math.max(0.15, 1 - fastW - tankW);       // always keep >=15% basics
-  
+
       const sum = basicW + fastW + tankW;                   // normalize just in case
       weights = { basic: basicW / sum, fast: fastW / sum, tank: tankW / sum };
     }
-  
+
     const totalToSpawn = (plan.count || 0) + (plan.burstBonus || 0);
     let spawned = 0;
     this.spawning = true;
-  
+
     const pickType = () => {
       if (this.wave <= 3) return 'basic'; // HARD GUARD (prevents any accidental variety)
       const a = Math.max(0, weights.basic || 0);
@@ -274,39 +269,39 @@ export class Game {
       const r = Math.random() * sum;
       return (r < a) ? 'basic' : (r < a + b) ? 'fast' : 'tank';
     };
-  
+
     const spawnOne = () => {
       if (this.gameOver) { this.spawning = false; return; }
       if (spawned >= totalToSpawn) { this.spawning = false; return; }
-  
+
       // Decide type and spawn
       let type = pickType();
       if (this.wave <= 3) type = 'basic'; // REDUNDANT HARD GUARD (belt-and-suspenders)
-  
+
       const enemy = this.enemyPool.get();
       enemy.init(type, scaling);           // Enemy.js accepts scaling
       this.enemies.push(enemy);
       spawned++;
-  
+
       // Spawn pacing (seconds) with light jitter and a floor
       const jitter = (Math.random() * 0.12) - 0.06; // ±0.06s
       const intervalSec = Math.max(0.10, (plan.interval || 1.0) + jitter);
       setTimeout(spawnOne, intervalSec * 1000);
     };
-  
-    spawnOne();
-  }    
 
-  selectTower(type) { 
-    this.selectedTowerType = type; 
-    this.sellMode = false; 
+    spawnOne();
+  }
+
+  selectTower(type) {
+    this.selectedTowerType = type;
+    this.sellMode = false;
     this.upgradeMode = false;
     this.selectedTower = null;
     this.hideUpgradePanel();
   }
-  
-  toggleSellMode() { 
-    this.sellMode = !this.sellMode; 
+
+  toggleSellMode() {
+    this.sellMode = !this.sellMode;
     if (this.sellMode) {
       this.selectedTowerType = null;
       this.upgradeMode = false;
@@ -314,7 +309,7 @@ export class Game {
       this.hideUpgradePanel();
     }
   }
-  
+
   toggleUpgradeMode() {
     this.upgradeMode = !this.upgradeMode;
     if (this.upgradeMode) {
@@ -325,8 +320,8 @@ export class Game {
       this.hideUpgradePanel();
     }
   }
-  toggleSound() { 
-    this.soundManager.toggle(); 
+  toggleSound() {
+    this.soundManager.toggle();
     const btn = document.getElementById('soundToggleBtn');
     btn.textContent = this.soundManager.enabled ? '🔊 Sound' : '🔇 Sound';
   }
@@ -339,42 +334,42 @@ export class Game {
   showUpgradePanel(tower) {
     const panel = document.getElementById('upgradePanel');
     if (!panel) return;
-    
+
     // Update current stats
     document.getElementById('currentDamage').textContent = tower.damage;
     document.getElementById('currentRange').textContent = tower.range;
     document.getElementById('currentFireRate').textContent = tower.fireRate.toFixed(1);
-    
+
     // Update upgrade costs
     document.getElementById('damageCost').textContent = tower.getUpgradeCost('damage');
     document.getElementById('rangeCost').textContent = tower.getUpgradeCost('range');
     document.getElementById('fireRateCost').textContent = tower.getUpgradeCost('fireRate');
-    
+
     // Update sell value
     document.getElementById('sellValue').textContent = tower.getSellValue();
-    
+
     // Enable/disable buttons based on upgrade levels and money
     const damageBtn = document.getElementById('upgradeDamageBtn');
     const rangeBtn = document.getElementById('upgradeRangeBtn');
     const fireRateBtn = document.getElementById('upgradeFireRateBtn');
-    
+
     damageBtn.disabled = tower.damageLevel >= tower.maxUpgradeLevel || this.money < tower.getUpgradeCost('damage');
     rangeBtn.disabled = tower.rangeLevel >= tower.maxUpgradeLevel || this.money < tower.getUpgradeCost('range');
     fireRateBtn.disabled = tower.fireRateLevel >= tower.maxUpgradeLevel || this.money < tower.getUpgradeCost('fireRate');
-    
+
     panel.style.display = 'block';
   }
 
   upgradeTower(upgradeType) {
     if (!this.selectedTower) return;
-    
+
     const cost = this.selectedTower.getUpgradeCost(upgradeType);
     if (this.money < cost) return;
-    
+
     this.money -= cost;
     this.selectedTower.upgrade(upgradeType);
     this.soundManager.playTowerPlace(); // Reuse sound for upgrade
-    
+
     // Update the panel
     this.showUpgradePanel(this.selectedTower);
   }
@@ -410,7 +405,7 @@ export class Game {
   onClick(e) {
     if (this.gameOver) return;
     const { tx, ty } = this.screenToTile(e);
-    
+
     if (this.sellMode) {
       const idx = this.towers.findIndex(t => t.tx === tx && t.ty === ty);
       if (idx >= 0) {
@@ -419,7 +414,7 @@ export class Game {
       }
       return;
     }
-    
+
     if (this.upgradeMode) {
       const tower = this.towers.find(t => t.tx === tx && t.ty === ty);
       if (tower) {
@@ -431,7 +426,7 @@ export class Game {
       }
       return;
     }
-    
+
     if (!this.selectedTowerType) return;
     if (isOnPath(tx, ty, this.path)) return; // cannot build on path
     if (this.towers.some(t => t.tx === tx && t.ty === ty)) return; // occupied
@@ -456,5 +451,3 @@ export class Game {
     g.restore();
   }
 }
-
-
