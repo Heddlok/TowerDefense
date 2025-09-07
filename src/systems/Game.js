@@ -115,14 +115,25 @@ export class Game {
       const p = this.projectiles[i];
       p.update(1/60);
       
-      if (p.hitTarget) {
-        p.target.hp -= p.damage;
-        if (p.target.hp <= 0) {
-          p.target.isDead = true;
-          this.money += p.target.reward;
-          this.soundManager.playEnemyDeath();
+      if (p.hitTarget && p.target && !p.target.isDead && !p.target.reachedEnd) {
+        const killed = typeof p.target.takeDamage === 'function'
+          ? p.target.takeDamage(p.damage)
+          : ((p.target.hp -= (Number.isFinite(p.damage) ? Math.max(0, p.damage) : 0)),
+             (p.target.hp <= 1e-6 ? (p.target.hp = 0, p.target.isDead = true, true) : false));
+      
+        if (killed) {
+          // Guard against double-reward if multiple projectiles register this frame
+          if (!p._rewardedKill) {
+            this.money += (p.target.reward | 0);
+            this.soundManager.playEnemyDeath();
+            p._rewardedKill = true;
+          }
         }
+      
+        // If your projectile is meant to be single-hit, ensure it’s consumed:
+        if (!p.done) p.done = true;
       }
+      
       
       if (p.done) {
         this.projectilePool.release(p);

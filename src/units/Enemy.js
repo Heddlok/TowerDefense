@@ -19,6 +19,9 @@ export class Enemy {
     this.x = 0;
     this.y = 0;
 
+    // Generation token (helps ignore stale hits after pooling reuse)
+    this._gen = (Enemy._nextGen = (Enemy._nextGen || 0) + 1);
+
     // Pathfinding cache for performance
     this._segments = null;
     this._sIndex = 0;
@@ -54,6 +57,9 @@ export class Enemy {
     this.x = 0;
     this.y = 0;
 
+    // New generation token each reuse from the pool
+    this._gen = (Enemy._nextGen = (Enemy._nextGen || 0) + 1);
+
     // Reset pathfinding cache
     this._segments = null;
     this._sIndex = 0;
@@ -64,6 +70,7 @@ export class Enemy {
   reset() {
     this.isDead = true;
     this.reachedEnd = false;
+    this.hp = 0;            // defensive: clearly "not alive" while idle in pool
     this._segments = null;
   }
 
@@ -92,6 +99,27 @@ export class Enemy {
       }
     };
     return stats[type] || stats.basic;
+  }
+
+  /**
+   * Safe damage application to avoid NaN/float edge-cases and double-rewards.
+   * @param {number} dmg
+   * @returns {boolean} true if this hit killed the enemy
+   */
+  takeDamage(dmg) {
+    // Coerce to a finite, non-negative number
+    const amount = Number.isFinite(dmg) ? Math.max(0, dmg) : 0;
+    if (amount <= 0 || this.isDead || this.reachedEnd) return false;
+
+    this.hp -= amount;
+
+    // Use small epsilon to avoid lingering -0.0000001 style cases
+    if (this.hp <= 1e-6) {
+      this.hp = 0;
+      this.isDead = true;
+      return true;
+    }
+    return false;
   }
 
   update(dt, path) {
