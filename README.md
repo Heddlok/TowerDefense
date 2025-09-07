@@ -17,17 +17,6 @@ A polished HTML5 Canvas tower defense game with multiple tower types, enemy vari
 - **Game Over**: Ends when lives reach 0 with restart option
 - **Performance Optimized**: Object pooling, spatial partitioning, adaptive quality scaling
 
-## 🚀 Quick Start
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/Heddlok/TowerDefense.git
-   cd TowerDefense
-   ```
-
-2. **Open in browser**
-   - Open `index.html` directly in a modern browser, or
-   - Serve locally: `python3 -m http.server 8080`
 
 ## 🎯 How to Play
 
@@ -73,9 +62,9 @@ Upgrade costs scale exponentially based on tower type and current level. Higher-
   - Adaptive quality scaling based on FPS
   - Real-time performance monitoring with FPS display
 
-## 📁 Project Structure
 
-```
+
+
 TowerDefense/
 ├── index.html              # Main HTML file
 ├── styles.css              # Game styling
@@ -100,7 +89,7 @@ TowerDefense/
 
 ## 🎨 Screenshots
 
-*Add screenshots of your game here*
+
 
 ## 🤝 Contributing
 
