@@ -19,6 +19,9 @@ export class Enemy {
     this.x = 0;
     this.y = 0;
 
+    // NEW: grant-money-once flag (persists per enemy lifetime)
+    this._rewardGranted = false;
+
     // Generation token (helps ignore stale hits after pooling reuse)
     this._gen = (Enemy._nextGen = (Enemy._nextGen || 0) + 1);
 
@@ -57,6 +60,9 @@ export class Enemy {
     this.x = 0;
     this.y = 0;
 
+    // NEW: reset reward flag each reuse from the pool
+    this._rewardGranted = false;
+
     // New generation token each reuse from the pool
     this._gen = (Enemy._nextGen = (Enemy._nextGen || 0) + 1);
 
@@ -72,6 +78,7 @@ export class Enemy {
     this.reachedEnd = false;
     this.hp = 0;            // defensive: clearly "not alive" while idle in pool
     this._segments = null;
+    this._rewardGranted = false; // NEW: ensure clean when returned to pool
   }
 
   getEnemyStats(type) {
