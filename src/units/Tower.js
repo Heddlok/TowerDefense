@@ -2,7 +2,8 @@
 import { TILE_SIZE } from '../world/map.js';
 
 // Global multiplier for all ranges (1.0 = as listed below)
-const RANGE_TWEAK = 0.80; // lower this for shorter ranges across the board
+// Bump ranges up a little from 0.80 → 0.90
+const RANGE_TWEAK = 0.90;
 
 // Define range in *tiles*; converted to pixels below.
 const RANGE_TILES = {
@@ -125,7 +126,6 @@ export class Tower {
     // Find a target (prefer spatial grid), but ALWAYS re-check exact distance.
     let target = null;
     if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
-      // Some grid implementations return a “broad” set; we still filter by true circle.
       const candidates = spatialGrid.queryCircle(this.x, this.y, this.range);
       target = candidates.find(e => !e.isDead && !e.reachedEnd && this._inRange(e));
     } else {
