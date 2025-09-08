@@ -1,8 +1,15 @@
 // src/units/Tower.js
 import { TILE_SIZE } from '../world/map.js';
 
-// Global range tweak: reduce effective range ~10%
-const RANGE_TWEAK = 0.70;
+// Global multiplier for all ranges (1.0 = as listed below)
+const RANGE_TWEAK = 0.85; // try 0.75 if you want even tighter
+
+// Define range in *tiles* for clarity, then we convert to pixels.
+const RANGE_TILES = {
+  basic: 1.00, // ~1 tile
+  rapid: 0.80, // ~0.8 tile
+  heavy: 0.60, // ~0.6 tile
+};
 
 export class Tower {
   // --- Pricing knobs ---
@@ -17,8 +24,8 @@ export class Tower {
   static getNextTowerCost(type) {
     const base  = this.baseCosts[type] ?? 0;
     const mul   = this.priceMul[type]  ?? 1.0;
-    const n     = this.towerCounts[type] ?? 0; // how many already bought
-    const steps = Math.floor(n / 2);           // bump price every 2 towers
+    const n     = this.towerCounts[type] ?? 0; // already bought
+    const steps = Math.floor(n / 2);           // bump every 2 towers
     return Math.max(1, Math.round(base * Math.pow(mul, steps)));
   }
 
@@ -49,17 +56,20 @@ export class Tower {
     this.x = tx * TILE_SIZE + TILE_SIZE / 2;
     this.y = ty * TILE_SIZE + TILE_SIZE / 2;
 
-    // Stats (baseline tuned for 32px tiles; scale to current TILE_SIZE)
-    const RANGE_SCALE = TILE_SIZE / 32;
-    const baseStats = {
-      basic: { range: 80, damage: 10, fireRate: 1.0 },
-      rapid: { range:  40, damage:  6, fireRate: 2.0 },
-      heavy: { range: 20, damage: 20, fireRate: 0.6 },
-    }[type] || { range: 80, damage: 8, fireRate: 1.0 };
+    // ---- Stats ----
+    // Range: convert tiles -> pixels and apply tweak
+    const tiles = RANGE_TILES[type] ?? RANGE_TILES.basic;
+    this.range = tiles * TILE_SIZE * RANGE_TWEAK; // pixels
 
-    this.range    = (baseStats.range ?? 96) * RANGE_SCALE * RANGE_TWEAK; // pixels
-    this.damage   = baseStats.damage ?? 8;
-    this.fireRate = baseStats.fireRate ?? 1.0;
+    // Damage / fire rate (unchanged from your last setup)
+    const baseStats = {
+      basic: { damage: 10, fireRate: 1.0 },
+      rapid: { damage:  6, fireRate: 2.0 },
+      heavy: { damage: 20, fireRate: 0.6 },
+    }[type] || { damage: 8, fireRate: 1.0 };
+
+    this.damage   = baseStats.damage;
+    this.fireRate = baseStats.fireRate;
 
     this.color = Tower.colors[type] || '#9E9E9E';
 
@@ -89,7 +99,10 @@ export class Tower {
       this.damageLevel++; this.damage = Math.round(this.damage * 1.25); return true;
     }
     if (kind === 'range' && this.rangeLevel < this.maxUpgradeLevel) {
-      this.rangeLevel++; this.range = Math.round(this.range * 1.15); return true;
+      // Range upgrades scale multiplicatively but gently
+      this.rangeLevel++;
+      this.range = +(this.range * 1.10).toFixed(3); // +10% per range upgrade
+      return true;
     }
     if (kind === 'fireRate' && this.fireRateLevel < this.maxUpgradeLevel) {
       this.fireRateLevel++; this.fireRate = +(this.fireRate * 1.20).toFixed(3); return true;
@@ -145,7 +158,7 @@ export class Tower {
     g.strokeRect(Math.floor(left) + 0.5, Math.floor(top) + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     g.restore();
 
-    // // (Optional) draw range for debugging:
+    // // (Optional) visualize range:
     // g.save();
     // g.strokeStyle = this.color;
     // g.globalAlpha = 0.25;
