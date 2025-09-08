@@ -26,20 +26,16 @@ function expandToOrthogonalPath(nodes) {
   for (let i = 1; i < nodes.length; i++) {
     const x1 = xi(nodes[i]), y1 = yi(nodes[i]);
 
-    // Horizontal sweep
+    // Horizontal sweep (x0 -> x1 at constant y0)
     if (x0 !== x1) {
       const sx = x0 < x1 ? 1 : -1;
-      for (let x = x0 + sx; x !== x1 + sx; x += sx) {
-        out.push({ x, y: y0 });
-      }
+      for (let x = x0 + sx; x !== x1 + sx; x += sx) out.push({ x, y: y0 });
     }
 
-    // Vertical sweep
+    // Vertical sweep (y0 -> y1 at constant x1)
     if (y0 !== y1) {
       const sy = y0 < y1 ? 1 : -1;
-      for (let y = y0 + sy; y !== y1 + sy; y += sy) {
-        out.push({ x: x1, y });
-      }
+      for (let y = y0 + sy; y !== y1 + sy; y += sy) out.push({ x: x1, y });
     }
 
     x0 = x1; y0 = y1;
@@ -68,10 +64,10 @@ export class Game {
     this.planningTime = 5.0; // seconds between waves
     this.spawning = false;
 
-    // ---- Path setup (Manhattan) ----
-    this.path = createPath();                        // sparse nodes
-    this.pathOrtho = expandToOrthogonalPath(this.path); // per-tile steps (no diagonals)
-    this.pathMask = maskFromSteps(this.pathOrtho);      // exact blocked tiles
+    // ---- Path setup (use Manhattan steps everywhere) ----
+    this._cornerNodes = createPath();            // original sparse nodes
+    this.path = expandToOrthogonalPath(this._cornerNodes); // per-tile, H/V only
+    this.pathMask = maskFromSteps(this.path);    // exact blocked tiles
 
     this.enemies = [];
     this.towers = [];
@@ -195,7 +191,7 @@ export class Game {
     // Enemies (use orthogonal per-tile path)
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const enemy = this.enemies[i];
-      enemy.update(1 / 60, this.pathOrtho);
+      enemy.update(1 / 60, this.path);
 
       if (enemy.reachedEnd) {
         this.lives -= 1;
@@ -277,8 +273,8 @@ export class Game {
     g.strokeStyle = '#3b516f';
     g.lineWidth = 2;
     g.beginPath();
-    for (let i = 0; i < this.pathOrtho.length; i++) {
-      const n = this.pathOrtho[i];
+    for (let i = 0; i < this.path.length; i++) {
+      const n = this.path[i];
       const cx = n.x * TILE_SIZE + TILE_SIZE / 2;
       const cy = n.y * TILE_SIZE + TILE_SIZE / 2;
       if (i === 0) g.moveTo(cx, cy); else g.lineTo(cx, cy);
@@ -493,12 +489,17 @@ export class Game {
         if (this.wave <= 3) type = 'basic';
 
         const enemy = this.enemyPool.get();
-        enemy.init(type, scaling);
-        // If your Enemy has a custom setter, you can call enemy.setPath(this.pathOrtho)
+
+        // Init + ensure H/V path is attached no matter how Enemy is implemented
+        if (enemy.init.length >= 3) enemy.init(type, scaling, this.path);
+        else enemy.init(type, scaling);
+        if (typeof enemy.setPath === 'function') enemy.setPath(this.path);
+        else enemy.path = this.path;
+
         this.enemies.push(enemy);
         spawned++;
 
-        const jitter = (Math.random() * 0.12) - 0.06;
+        const jitter = (Math.random() * 0.12) - 0.06; // ±0.06s
         const base = Number.isFinite(plan.interval) ? plan.interval : 1.0;
         const intervalSec = Math.max(0.10, base + jitter);
         setTimeout(spawnOne, intervalSec * 1000);
