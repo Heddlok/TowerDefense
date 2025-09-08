@@ -1,218 +1,130 @@
+// src/units/Enemy.js
 import { TILE_SIZE } from '../world/map.js';
 
 export class Enemy {
-  constructor(type = 'basic') {
-    this.type = type;
+  constructor() { this.reset(); }
 
-    // Enemy stats based on type
-    const stats = this.getEnemyStats(type);
-    this.speed = stats.speed;
-    this.radius = stats.radius;
-    this.color = stats.color;
-    this.maxHp = stats.maxHp;
-    this.hp = this.maxHp;
-    this.reward = stats.reward;
-
-    this.progress = 0; // (unused) along path segments
-    this.isDead = false;
-    this.reachedEnd = false;
-    this.x = 0;
-    this.y = 0;
-
-    // Pay-once flag (prevents reward glitches)
-    this._rewardGranted = false;
-
-    // Generation token (can help ignore stale hits after pooling reuse)
-    this._gen = (Enemy._nextGen = (Enemy._nextGen || 0) + 1);
-
-    // Pathfinding cache for performance
-    this._segments = null;
-    this._sIndex = 0;
-    this._sProgress = 0;
-  }
-
-  /**
-   * Initialize enemy with specific type and optional per-wave scaling.
-   * @param {('basic'|'fast'|'tank')} type
-   * @param {{hpMul?:number, speedMul?:number, rewardMul?:number}} [scaling]
-   */
-  init(type = 'basic', scaling = { hpMul: 1, speedMul: 1, rewardMul: 1 }) {
-    this.type = type;
-    const stats = this.getEnemyStats(type);
-
-    // Apply per-wave scaling (defaults keep original behavior)
-    const hpMul = Number.isFinite(scaling.hpMul) ? scaling.hpMul : 1;
-    const spMul = Number.isFinite(scaling.speedMul) ? scaling.speedMul : 1;
-    const rwMul = Number.isFinite(scaling.rewardMul) ? scaling.rewardMul : 1;
-
-    this.speed = stats.speed * spMul;
-    this.radius = stats.radius;
-    this.color = stats.color;
-
-    // Round hp/reward to ints, never below 1
-    this.maxHp = Math.max(1, Math.round(stats.maxHp * hpMul));
-    this.hp = this.maxHp;
-    this.reward = Math.max(1, Math.round(stats.reward * rwMul));
-
-    this.progress = 0;
-    this.isDead = false;
-    this.reachedEnd = false;
-    this.x = 0;
-    this.y = 0;
-
-    // Reset per-lifetime flags
-    this._rewardGranted = false;
-
-    // New generation token each reuse from the pool
-    this._gen = (Enemy._nextGen = (Enemy._nextGen || 0) + 1);
-
-    // Reset pathfinding cache
-    this._segments = null;
-    this._sIndex = 0;
-    this._sProgress = 0;
-  }
-
-  // Reset for object pooling
   reset() {
-    this.isDead = true;
+    this.type = 'basic';
+    this.x = 0; this.y = 0;           // ALWAYS PIXELS (center)
+    this.w = TILE_SIZE * 0.8;         // for render/centering if needed
+    this.h = TILE_SIZE * 0.8;
+
+    this.maxHp = 1;
+    this.hp = 1;
+    this.speed = 60;                   // px/s
+    this.reward = 1;
+
+    this.isDead = false;
     this.reachedEnd = false;
-    this.hp = 0;            // defensive: clearly "not alive" while idle in pool
-    this._segments = null;
-    this._rewardGranted = false;
+
+    this.path = null;                  // array of {x,y} in TILES
+    this.seg = 0;                      // moving from path[seg-1] -> path[seg]
+    this._tx = 0; this._ty = 0;        // current target (pixels)
   }
 
-  getEnemyStats(type) {
-    const stats = {
-      basic: { speed: 70,  radius: 12, color: '#e5534b', maxHp: 30, reward: 10 },
-      fast:  { speed: 120, radius: 8,  color: '#f85149', maxHp: 15, reward: 15 },
-      tank:  { speed: 40,  radius: 16, color: '#8b5cf6', maxHp: 80, reward: 25 }
-    };
-    return stats[type] || stats.basic;
+  _tileCenterPx(t) {
+    return { x: t.x * TILE_SIZE + TILE_SIZE / 2, y: t.y * TILE_SIZE + TILE_SIZE / 2 };
   }
 
-  // --- HP sanitizer: clamps bad or tiny values to a clean death state ---
-  _sanitizeHpToLifeState() {
-    // If hp ever becomes NaN or tiny negative, kill immediately.
-    if (!Number.isFinite(this.hp) || this.hp <= 1e-6) {
-      this.hp = 0;
-      this.isDead = true;
-      return true; // became dead
+  setPath(path) {
+    this.path = Array.isArray(path) ? path : null;
+    if (!this.path || this.path.length < 2) {
+      this.reachedEnd = true;
+      return;
     }
-    // Clamp over-heal (just in case)
-    if (this.hp > this.maxHp) this.hp = this.maxHp;
-    return false;
+    const a = this._tileCenterPx(this.path[0]);
+    const b = this._tileCenterPx(this.path[1]);
+    this.x = a.x; this.y = a.y;        // start in PIXELS
+    this.seg = 1;
+    this._tx = b.x; this._ty = b.y;
   }
 
-  /**
-   * Safe damage application to avoid NaN/float edge-cases and double-rewards.
-   * @param {number} dmg
-   * @returns {boolean} true if this hit killed the enemy
-   */
+  init(type, scaling = {}, path) {
+    this.reset();
+    this.type = type || 'basic';
+
+    const base = {
+      basic: { hp: 30,  speed: 70,  reward: 5 },
+      fast:  { hp: 20,  speed: 120, reward: 6 },
+      tank:  { hp: 120, speed: 45,  reward: 10 },
+    }[this.type] || { hp: 30, speed: 70, reward: 5 };
+
+    const hpMul     = Number.isFinite(scaling.hpMul)     ? scaling.hpMul     : 1;
+    const speedMul  = Number.isFinite(scaling.speedMul)  ? scaling.speedMul  : 1;
+    const rewardMul = Number.isFinite(scaling.rewardMul) ? scaling.rewardMul : 1;
+
+    this.maxHp = Math.max(1, Math.round(base.hp * hpMul));
+    this.hp    = this.maxHp;
+    this.speed = Math.max(1, base.speed * speedMul);
+    this.reward = Math.max(0, Math.round(base.reward * rewardMul));
+
+    if (path) this.setPath(path);
+  }
+
   takeDamage(dmg) {
-    // Coerce to a finite, non-negative number
-    const amount = Number.isFinite(dmg) ? Math.max(0, dmg) : 0;
-    if (amount <= 0 || this.isDead || this.reachedEnd) return false;
-
-    this.hp -= amount;
-
-    // Kill on bad/low hp deterministically
-    if (this._sanitizeHpToLifeState()) return true;
+    const d = Number.isFinite(dmg) ? Math.max(0, dmg) : 0;
+    this.hp -= d;
+    if (this.hp <= 0) {
+      this.hp = 0; this.isDead = true;
+      return true;
+    }
     return false;
   }
 
-  update(dt, path) {
+  update(dt, pathFromCaller) {
     if (this.isDead || this.reachedEnd) return;
 
-    // If hp got corrupted between frames, mark dead now.
-    if (this._sanitizeHpToLifeState()) return;
-
-    // Build path segments lazily
-    if (!this._segments) {
-      this._segments = [];
-      for (let i = 0; i < path.length - 1; i++) {
-        const a = path[i];
-        const b = path[i + 1];
-        const ax = a.x * TILE_SIZE + TILE_SIZE / 2;
-        const ay = a.y * TILE_SIZE + TILE_SIZE / 2;
-        const bx = b.x * TILE_SIZE + TILE_SIZE / 2;
-        const by = b.y * TILE_SIZE + TILE_SIZE / 2;
-        const dx = bx - ax;
-        const dy = by - ay;
-        const len = Math.hypot(dx, dy);
-        this._segments.push({ ax, ay, bx, by, len, dx, dy });
-      }
-      this._sIndex = 0;
-      this._sProgress = 0;
-      if (this._segments.length) {
-        this.x = this._segments[0].ax;
-        this.y = this._segments[0].ay;
-      }
+    if (!this.path) {
+      if (pathFromCaller) this.setPath(pathFromCaller);
+      if (!this.path) return;
     }
 
-    // Advance along segments (skip any zero-length segments safely)
-    let remaining = this.speed * dt;
-    while (remaining > 0 && this._sIndex < this._segments.length) {
-      const s = this._segments[this._sIndex];
+    // Move toward current target (pixel)
+    const dx = this._tx - this.x;
+    const dy = this._ty - this.y;
+    const dist = Math.hypot(dx, dy);
 
-      // Handle degenerate segments to avoid NaN
-      if (s.len <= 1e-9) {
-        this.x = s.bx;
-        this.y = s.by;
-        this._sIndex++;
-        this._sProgress = 0;
-        continue;
-      }
-
-      const left = s.len - this._sProgress;
-      const step = Math.min(remaining, left);
-      const t = (this._sProgress + step) / s.len;
-      this.x = s.ax + s.dx * t;
-      this.y = s.ay + s.dy * t;
-      this._sProgress += step;
-      remaining -= step;
-
-      if (this._sProgress >= s.len - 0.0001) {
-        this._sIndex++;
-        this._sProgress = 0;
-      }
+    if (dist <= 0.0001) {
+      // advance to next node
+      this.seg++;
+      if (this.seg >= this.path.length) { this.reachedEnd = true; return; }
+      const n = this._tileCenterPx(this.path[this.seg]);
+      this._tx = n.x; this._ty = n.y;
+      return; // step next frame
     }
 
-    if (this._sIndex >= this._segments.length) {
-      this.reachedEnd = true;
+    const step = this.speed * dt;
+    if (step >= dist) {
+      this.x = this._tx; this.y = this._ty;
+      return;
     }
-  }
 
-  // Provide bounds so SpatialGrid (and any broad-phase) can bucket this enemy
-  getBounds() {
-    const r = this.radius;
-    return { x: this.x - r, y: this.y - r, w: r * 2, h: r * 2 };
+    this.x += (dx / dist) * step;
+    this.y += (dy / dist) * step;
   }
 
   render(g) {
-    // health bar
-    g.fillStyle = '#000000';
-    g.fillRect(this.x - 14, this.y - 20, 28, 4);
-    g.fillStyle = '#2ea043';
-    const w = Math.max(0, 28 * (this.hp / this.maxHp));
-    g.fillRect(this.x - 14, this.y - 20, w, 4);
-
-    // body
+    g.save();
+    g.fillStyle = this.type === 'fast' ? '#ff6d6d' : (this.type === 'tank' ? '#c050ff' : '#ff5a5a');
     g.beginPath();
-    g.fillStyle = this.color;
-    g.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+    g.arc(this.x, this.y, 10, 0, Math.PI * 2);
     g.fill();
 
-    // outline
-    g.strokeStyle = '#ffffff';
-    g.lineWidth = 1;
-    g.beginPath();
-    g.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-    g.stroke();
+    // HP bar
+    const bw = 22, bh = 4, yOff = 16;
+    const frac = this.maxHp ? Math.max(0, this.hp / this.maxHp) : 0;
+    g.fillStyle = '#2b2b2b';
+    g.fillRect(this.x - bw/2, this.y - yOff, bw, bh);
+    g.fillStyle = '#3ecf8e';
+    g.fillRect(this.x - bw/2, this.y - yOff, bw * frac, bh);
 
-    // type indicator
-    g.fillStyle = '#ffffff';
-    g.font = 'bold 10px system-ui';
+    // Label
+    g.fillStyle = '#fff';
+    g.font = '10px system-ui, -apple-system';
     g.textAlign = 'center';
-    g.fillText(this.type.charAt(0).toUpperCase(), this.x, this.y + 3);
+    g.textBaseline = 'middle';
+    g.fillText((this.type[0] || 'B').toUpperCase(), this.x, this.y);
+    g.restore();
   }
 }
