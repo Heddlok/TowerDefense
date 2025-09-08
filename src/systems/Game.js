@@ -9,36 +9,49 @@ import { SpatialGrid } from '../utils/SpatialGrid.js';
 import { PerformanceMonitor } from '../utils/PerformanceMonitor.js';
 import { getWavePlan, getWaveScaling } from './Difficulty.js';
 
-// -------- Path rasterization helpers (exact tile mask) --------
+// ---------- Path helpers (Manhattan-only) ----------
 const _k = (x, y) => `${x},${y}`;
 
-/** Convert a polyline path (tile coords) into a Set of blocked tiles */
-function rasterizePathToMask(path) {
-  const mask = new Set();
-  if (!Array.isArray(path) || path.length < 2) return mask;
+/** Expand polyline nodes into per-tile orthogonal steps (no diagonals). */
+function expandToOrthogonalPath(nodes) {
+  const out = [];
+  if (!Array.isArray(nodes) || nodes.length === 0) return out;
 
-  const toInt = (v) => (typeof v === 'number' ? (v | 0) : (v && v.x !== undefined ? (v.x | 0) : 0));
-  const toIntY = (v) => (typeof v === 'number' ? (v | 0) : (v && v.y !== undefined ? (v.y | 0) : 0));
+  const xi = (p) => (p && typeof p.x === 'number' ? (p.x | 0) : 0);
+  const yi = (p) => (p && typeof p.y === 'number' ? (p.y | 0) : 0);
 
-  for (let i = 0; i < path.length - 1; i++) {
-    let x0 = toInt(path[i]),     y0 = toIntY(path[i]);
-    const x1 = toInt(path[i+1]), y1 = toIntY(path[i+1]);
+  let x0 = xi(nodes[0]), y0 = yi(nodes[0]);
+  out.push({ x: x0, y: y0 });
 
-    const dx = Math.abs(x1 - x0);
-    const dy = Math.abs(y1 - y0);
-    const sx = x0 < x1 ? 1 : -1;
-    const sy = y0 < y1 ? 1 : -1;
-    let err = dx - dy;
+  for (let i = 1; i < nodes.length; i++) {
+    const x1 = xi(nodes[i]), y1 = yi(nodes[i]);
 
-    while (true) {
-      mask.add(_k(x0, y0));
-      if (x0 === x1 && y0 === y1) break;
-      const e2 = 2 * err;
-      if (e2 > -dy) { err -= dy; x0 += sx; }
-      if (e2 <  dx) { err += dx; y0 += sy; }
+    // Horizontal sweep
+    if (x0 !== x1) {
+      const sx = x0 < x1 ? 1 : -1;
+      for (let x = x0 + sx; x !== x1 + sx; x += sx) {
+        out.push({ x, y: y0 });
+      }
     }
+
+    // Vertical sweep
+    if (y0 !== y1) {
+      const sy = y0 < y1 ? 1 : -1;
+      for (let y = y0 + sy; y !== y1 + sy; y += sy) {
+        out.push({ x: x1, y });
+      }
+    }
+
+    x0 = x1; y0 = y1;
   }
-  return mask;
+  return out;
+}
+
+/** Build a mask Set from per-tile steps. */
+function maskFromSteps(steps) {
+  const s = new Set();
+  for (const n of steps) s.add(_k(n.x | 0, n.y | 0));
+  return s;
 }
 
 export class Game {
@@ -53,10 +66,12 @@ export class Game {
     this.gameOver = false;
     this.phase = 'planning'; // 'planning' | 'combat'
     this.planningTime = 5.0; // seconds between waves
-    this.spawning = false;   // true while current wave is still spawning
+    this.spawning = false;
 
-    this.path = createPath();
-    this.pathMask = rasterizePathToMask(this.path);
+    // ---- Path setup (Manhattan) ----
+    this.path = createPath();                        // sparse nodes
+    this.pathOrtho = expandToOrthogonalPath(this.path); // per-tile steps (no diagonals)
+    this.pathMask = maskFromSteps(this.pathOrtho);      // exact blocked tiles
 
     this.enemies = [];
     this.towers = [];
@@ -73,21 +88,13 @@ export class Game {
     // Performance / spatial
     this.perfMonitor = new PerformanceMonitor();
     this.spatialGrid = new SpatialGrid(canvas.width, canvas.height, TILE_SIZE);
-    this.currentRenderScale = 1; // for accurate input mapping
+    this.currentRenderScale = 1;
 
-    // Object pools
-    this.enemyPool = new ObjectPool(
-      () => new Enemy(),
-      (enemy) => enemy.reset(),
-      20
-    );
-    this.projectilePool = new ObjectPool(
-      () => new Projectile(),
-      (proj) => proj.reset(),
-      50
-    );
+    // Pools
+    this.enemyPool = new ObjectPool(() => new Enemy(), (e) => e.reset(), 20);
+    this.projectilePool = new ObjectPool(() => new Projectile(), (p) => p.reset(), 50);
 
-    // Reset tower counts for new run
+    // New run
     Tower.resetCounts();
 
     // Events
@@ -96,18 +103,11 @@ export class Game {
     canvas.addEventListener('mousemove', this._onMouseMove);
     canvas.addEventListener('click', this._onClick);
 
-    // Hover tooltip should never block input
     const hi = document.getElementById('hoverInfo');
-    if (hi) {
-      hi.style.pointerEvents = 'none';
-      hi.style.userSelect = 'none';
-    }
+    if (hi) { hi.style.pointerEvents = 'none'; hi.style.userSelect = 'none'; }
   }
 
-  // -----------------------------
-  // UI-FACING METHODS (used by main.js)
-  // -----------------------------
-
+  // ---------- UI-FACING METHODS ----------
   selectTower(type) {
     this.selectedTowerType = type;
     this.sellMode = false;
@@ -115,7 +115,6 @@ export class Game {
     this.selectedTower = null;
     this.updateUI();
   }
-
   toggleSellMode() {
     this.sellMode = !this.sellMode;
     if (this.sellMode) {
@@ -126,7 +125,6 @@ export class Game {
     }
     this.updateUI();
   }
-
   toggleUpgradeMode() {
     this.upgradeMode = !this.upgradeMode;
     if (this.upgradeMode) {
@@ -138,57 +136,31 @@ export class Game {
     }
     this.updateUI();
   }
-
   toggleSound() {
     this._muted = !this._muted;
-    if (typeof this.soundManager?.setMuted === 'function') {
-      this.soundManager.setMuted(this._muted);
-    } else if (this.soundManager) {
-      this.soundManager.muted = this._muted;
-    }
+    if (typeof this.soundManager?.setMuted === 'function') this.soundManager.setMuted(this._muted);
+    else if (this.soundManager) this.soundManager.muted = this._muted;
     const btn = document.getElementById('soundToggleBtn');
     if (btn) btn.textContent = this._muted ? 'Sound: Off' : 'Sound: On';
   }
-
   upgradeTower(stat) {
     const t = this.selectedTower;
     if (!t) return;
-
-    if (typeof t.upgrade === 'function') {
-      t.upgrade(stat);
-    } else if (typeof t.tryUpgrade === 'function') {
-      t.tryUpgrade(stat);
-    } else {
-      // Fallback upgrades
-      switch (stat) {
-        case 'damage': t.damage = (t.damage ?? 5) + 1; break;
-        case 'range':  t.range  = (t.range  ?? (TILE_SIZE * 2)) + TILE_SIZE * 0.25; break;
-        case 'fireRate':
-          t.fireRate = Math.max(0.05, (t.fireRate ?? 1) * 0.9);
-          break;
-      }
+    if (typeof t.upgrade === 'function') t.upgrade(stat);
+    else if (typeof t.tryUpgrade === 'function') t.tryUpgrade(stat);
+    else {
+      if (stat === 'damage') t.damage = (t.damage ?? 5) + 1;
+      if (stat === 'range')  t.range  = (t.range  ?? (TILE_SIZE * 2)) + TILE_SIZE * 0.25;
+      if (stat === 'fireRate') t.fireRate = Math.max(0.05, (t.fireRate ?? 1) * 0.9);
     }
     this.showUpgradePanel(t);
     this.updateUI();
   }
+  showUpgradePanel() { const p = document.getElementById('upgradePanel'); if (p) p.style.display = 'block'; }
+  hideUpgradePanel() { const p = document.getElementById('upgradePanel'); if (p) p.style.display = 'none'; }
 
-  showUpgradePanel(/* tower */) {
-    const panel = document.getElementById('upgradePanel');
-    if (panel) panel.style.display = 'block';
-  }
-  hideUpgradePanel() {
-    const panel = document.getElementById('upgradePanel');
-    if (panel) panel.style.display = 'none';
-  }
-
-  // -----------------------------
-  // Placement helpers (use exact mask)
-  // -----------------------------
-
-  isOnPathTile(tx, ty) {
-    return this.pathMask?.has(_k(tx, ty)) === true;
-  }
-
+  // ---------- Placement helpers ----------
+  isOnPathTile(tx, ty) { return this.pathMask.has(_k(tx, ty)); }
   canBuildHere(tx, ty) {
     if (tx < 0 || ty < 0 || tx >= GRID_COLS || ty >= GRID_ROWS) return false;
     if (this.isOnPathTile(tx, ty)) return false;
@@ -196,31 +168,23 @@ export class Game {
     return true;
   }
 
-  // -----------------------------
-  // CORE LOOP
-  // -----------------------------
-
+  // ---------- Core loop ----------
   update(ts) {
     if (this.gameOver) { this.updateUI(); return; }
     this.time = ts;
     this.perfMonitor.update();
 
-    // Keep a fresh copy of renderScale each frame for input mapping
     const statsForInput = this.perfMonitor.getStats();
     this.currentRenderScale = statsForInput && Number.isFinite(statsForInput.renderScale)
       ? Math.max(0.001, statsForInput.renderScale) : 1;
 
     this.updateUI();
 
-    // planning timer
     if (this.phase === 'planning') {
       this.planningTime -= 1 / 60;
-      if (this.planningTime <= 0) {
-        this.startWave();
-      }
+      if (this.planningTime <= 0) this.startWave();
     }
 
-    // transition back to planning only after combat fully clears
     if (!this.gameOver && this.phase === 'combat') {
       if (!this.spawning && this.enemies.length === 0) {
         this.phase = 'planning';
@@ -228,10 +192,10 @@ export class Game {
       }
     }
 
-    // --- Update enemies first (positions/state) ---
+    // Enemies (use orthogonal per-tile path)
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const enemy = this.enemies[i];
-      enemy.update(1 / 60, this.path);
+      enemy.update(1 / 60, this.pathOrtho);
 
       if (enemy.reachedEnd) {
         this.lives -= 1;
@@ -241,28 +205,23 @@ export class Game {
           this.soundManager.playGameOver();
         }
       }
-
       if (enemy.isDead) {
         this.enemyPool.release(enemy);
         this.enemies.splice(i, 1);
       }
     }
 
-    // --- Rebuild spatial grid with current positions (no 1-frame lag) ---
+    // Spatial grid
     this.spatialGrid.clear();
-    for (const enemy of this.enemies) {
-      this.spatialGrid.insert(enemy);
+    for (const e of this.enemies) this.spatialGrid.insert(e);
+
+    // Towers
+    for (const t of this.towers) {
+      const shot = t.update(1 / 60, this.enemies, this.projectiles, this.spatialGrid, this.projectilePool);
+      if (shot) this.soundManager.playShoot();
     }
 
-    // towers acquire targets and shoot with spatial optimization
-    for (const tower of this.towers) {
-      const shot = tower.update(1 / 60, this.enemies, this.projectiles, this.spatialGrid, this.projectilePool);
-      if (shot) {
-        this.soundManager.playShoot();
-      }
-    }
-
-    // projectiles with object pooling
+    // Projectiles
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       p.update(1 / 60);
@@ -278,12 +237,9 @@ export class Game {
           p.target._rewardGranted = true;
           this.soundManager.playEnemyDeath();
         }
-
-        // Single-hit projectile consumption
         p.done = true;
       }
 
-      // Return projectile to pool when finished
       if (p.done) {
         this.projectilePool.release(p);
         this.projectiles.splice(i, 1);
@@ -295,19 +251,14 @@ export class Game {
     const g = this.ctx;
     const stats = this.perfMonitor.getStats();
 
-    // Also mirror renderScale here
     this.currentRenderScale = stats && Number.isFinite(stats.renderScale)
       ? Math.max(0.001, stats.renderScale) : 1;
 
-    // Adaptive quality scaling
-    if (stats.renderScale < 1.0) {
-      g.save();
-      g.scale(stats.renderScale, stats.renderScale);
-    }
+    if (stats.renderScale < 1.0) { g.save(); g.scale(stats.renderScale, stats.renderScale); }
 
     g.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // grid + path tiles (use exact mask)
+    // Grid + exact path tiles
     g.fillStyle = '#0e1520';
     g.fillRect(0, 0, this.canvas.width, this.canvas.height);
     for (let y = 0; y < GRID_ROWS; y++) {
@@ -322,28 +273,24 @@ export class Game {
       }
     }
 
-    // path outline (polyline)
+    // Path outline (draw through orthogonal steps)
     g.strokeStyle = '#3b516f';
     g.lineWidth = 2;
     g.beginPath();
-    for (let i = 0; i < this.path.length; i++) {
-      const node = this.path[i];
-      const cx = node.x * TILE_SIZE + TILE_SIZE / 2;
-      const cy = node.y * TILE_SIZE + TILE_SIZE / 2;
+    for (let i = 0; i < this.pathOrtho.length; i++) {
+      const n = this.pathOrtho[i];
+      const cx = n.x * TILE_SIZE + TILE_SIZE / 2;
+      const cy = n.y * TILE_SIZE + TILE_SIZE / 2;
       if (i === 0) g.moveTo(cx, cy); else g.lineTo(cx, cy);
     }
     g.stroke();
 
-    // towers
-    for (const tower of this.towers) tower.render(g);
-
-    // enemies
-    for (const enemy of this.enemies) enemy.render(g);
-
-    // projectiles
+    // Entities
+    for (const t of this.towers) t.render(g);
+    for (const e of this.enemies) e.render(g);
     for (const p of this.projectiles) p.render(g);
 
-    // hover
+    // Hover
     this.renderHover(g);
 
     if (this.gameOver) {
@@ -359,14 +306,11 @@ export class Game {
       g.restore();
     }
 
-    if (stats.renderScale < 1.0) {
-      g.restore();
-    }
+    if (stats.renderScale < 1.0) g.restore();
   }
 
   updateUI() {
     const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
-
     setText('money', this.money);
     setText('lives', this.lives);
     setText('wave', this.wave);
@@ -379,34 +323,29 @@ export class Game {
     const stats = this.perfMonitor.getStats();
     setText('fps', stats.fps);
 
-    // Update tower button labels/costs
     const basicBtn = document.getElementById('basicTowerBtn');
     const rapidBtn = document.getElementById('rapidTowerBtn');
     const heavyBtn = document.getElementById('heavyTowerBtn');
 
     if (basicBtn) {
-      const basicCost = Tower.getNextTowerCost('basic');
-      const basicCount = Tower.towerCounts.basic;
-      basicBtn.textContent = `Basic (${basicCost}) [${basicCount} built]`;
-      basicBtn.disabled = this.gameOver || this.money < basicCost;
+      const c = Tower.getNextTowerCost('basic');
+      const n = Tower.towerCounts.basic;
+      basicBtn.textContent = `Basic (${c}) [${n} built]`;
+      basicBtn.disabled = this.gameOver || this.money < c;
     }
     if (rapidBtn) {
-      const rapidCost = Tower.getNextTowerCost('rapid');
-      const rapidCount = Tower.towerCounts.rapid;
-      rapidBtn.textContent = `Rapid (${rapidCost}) [${rapidCount} built]`;
-      rapidBtn.disabled = this.gameOver || this.money < rapidCost;
+      const c = Tower.getNextTowerCost('rapid');
+      const n = Tower.towerCounts.rapid;
+      rapidBtn.textContent = `Rapid (${c}) [${n} built]`;
+      rapidBtn.disabled = this.gameOver || this.money < c;
     }
     if (heavyBtn) {
-      const heavyCost = Tower.getNextTowerCost('heavy');
-      const heavyCount = Tower.towerCounts.heavy;
-      heavyBtn.textContent = `Heavy (${heavyCost}) [${heavyCount} built]`;
-      heavyBtn.disabled = this.gameOver || this.money < heavyCost;
+      const c = Tower.getNextTowerCost('heavy');
+      const n = Tower.towerCounts.heavy;
+      heavyBtn.textContent = `Heavy (${c}) [${n} built]`;
+      heavyBtn.disabled = this.gameOver || this.money < c;
     }
 
-    const sellBtn = document.getElementById('sellModeBtn');
-    if (sellBtn) sellBtn.disabled = this.gameOver === true;
-
-    // Live cost readout
     const costEl = document.getElementById('cost');
     if (costEl) {
       costEl.textContent = this.selectedTowerType
@@ -421,47 +360,35 @@ export class Game {
     if (hc) hc.textContent = String(Tower.getNextTowerCost('heavy'));
   }
 
-  // Map mouse to canvas pixel space, undo renderScale, then to tile coords.
+  // Map mouse to canvas coords -> undo renderScale -> tiles
   screenToTile(e) {
     const rect = this.canvas.getBoundingClientRect();
-
     const scaleX = this.canvas.width / rect.width;
     const scaleY = this.canvas.height / rect.height;
-    let mxCanvas = (e.clientX - rect.left) * scaleX;
-    let myCanvas = (e.clientY - rect.top) * scaleY;
+    let mx = (e.clientX - rect.left) * scaleX;
+    let my = (e.clientY - rect.top) * scaleY;
 
     const rs = this.currentRenderScale || 1;
-    if (rs !== 1) {
-      mxCanvas /= rs;
-      myCanvas /= rs;
-    }
+    if (rs !== 1) { mx /= rs; my /= rs; }
 
-    const tx = Math.floor(mxCanvas / TILE_SIZE);
-    const ty = Math.floor(myCanvas / TILE_SIZE);
-
+    const tx = Math.floor(mx / TILE_SIZE);
+    const ty = Math.floor(my / TILE_SIZE);
     const cssX = (e.clientX - rect.left);
     const cssY = (e.clientY - rect.top);
-
-    return { tx, ty, mx: mxCanvas, my: myCanvas, cssX, cssY };
+    return { tx, ty, mx, my, cssX, cssY };
   }
 
   onMouseMove(e) {
     const { tx, ty, cssX, cssY } = this.screenToTile(e);
     const hoverInfo = document.getElementById('hoverInfo');
-
     if (hoverInfo) {
       hoverInfo.style.pointerEvents = 'none';
       hoverInfo.style.userSelect = 'none';
-
       if (this.selectedTowerType) {
-        hoverInfo.style.display = 'block';
-        hoverInfo.style.left = `${cssX + 12}px`;
-        hoverInfo.style.top  = `${cssY + 12}px`;
+        hoverInfo.style.display = 'block'; hoverInfo.style.left = `${cssX + 12}px`; hoverInfo.style.top = `${cssY + 12}px`;
         hoverInfo.textContent = 'Place tower';
       } else if (this.sellMode) {
-        hoverInfo.style.display = 'block';
-        hoverInfo.style.left = `${cssX + 12}px`;
-        hoverInfo.style.top  = `${cssY + 12}px`;
+        hoverInfo.style.display = 'block'; hoverInfo.style.left = `${cssX + 12}px`; hoverInfo.style.top = `${cssY + 12}px`;
         hoverInfo.textContent = 'Sell tower';
       } else {
         hoverInfo.style.display = 'none';
@@ -479,41 +406,33 @@ export class Game {
       if (idx >= 0) {
         const [sold] = this.towers.splice(idx, 1);
         this.money += sold.getSellValue();
-        // Optional: Tower.deregisterOnSell(sold.type);
       }
       return;
     }
 
     if (this.upgradeMode) {
       const tower = this.towers.find(t => t.tx === tx && t.ty === ty);
-      if (tower) {
-        this.selectedTower = tower;
-        this.showUpgradePanel(tower);
-      } else {
-        this.selectedTower = null;
-        this.hideUpgradePanel();
-      }
+      if (tower) { this.selectedTower = tower; this.showUpgradePanel(tower); }
+      else { this.selectedTower = null; this.hideUpgradePanel(); }
       return;
     }
 
     if (!this.selectedTowerType) return;
     if (!this.canBuildHere(tx, ty)) return;
 
-    // Quote current price and buy safely
     const type = this.selectedTowerType;
     const cost = Tower.getNextTowerCost(type);
     if (this.money < cost) return;
 
     this.money -= cost;
-    const t = new Tower(tx, ty, type, cost); // record actual price paid
+    const t = new Tower(tx, ty, type, cost);
     this.towers.push(t);
-    Tower.registerPurchase(type);            // advance pricing AFTER successful buy
+    Tower.registerPurchase(type);
     this.soundManager.playTowerPlace();
   }
 
   startWave() {
     if (this.gameOver) return;
-
     try {
       this.phase = 'combat';
       this.wave += 1;
@@ -533,7 +452,6 @@ export class Game {
         burstBonus: Number.isFinite(p.burstBonus) ? p.burstBonus : 0,
       };
 
-      // Composition
       let weights;
       if (this.wave <= 3) {
         weights = { basic: 1, fast: 0, tank: 0 };
@@ -576,10 +494,11 @@ export class Game {
 
         const enemy = this.enemyPool.get();
         enemy.init(type, scaling);
+        // If your Enemy has a custom setter, you can call enemy.setPath(this.pathOrtho)
         this.enemies.push(enemy);
         spawned++;
 
-        const jitter = (Math.random() * 0.12) - 0.06; // ±0.06s
+        const jitter = (Math.random() * 0.12) - 0.06;
         const base = Number.isFinite(plan.interval) ? plan.interval : 1.0;
         const intervalSec = Math.max(0.10, base + jitter);
         setTimeout(spawnOne, intervalSec * 1000);
