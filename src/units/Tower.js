@@ -2,9 +2,9 @@
 import { TILE_SIZE } from '../world/map.js';
 
 // Global multiplier for all ranges (1.0 = as listed below)
-const RANGE_TWEAK = 0.85; // try 0.75 if you want even tighter
+const RANGE_TWEAK = 0.80; // lower this for shorter ranges across the board
 
-// Define range in *tiles* for clarity, then we convert to pixels.
+// Define range in *tiles*; converted to pixels below.
 const RANGE_TILES = {
   basic: 1.00, // ~1 tile
   rapid: 0.80, // ~0.8 tile
@@ -61,7 +61,7 @@ export class Tower {
     const tiles = RANGE_TILES[type] ?? RANGE_TILES.basic;
     this.range = tiles * TILE_SIZE * RANGE_TWEAK; // pixels
 
-    // Damage / fire rate (unchanged from your last setup)
+    // Damage / fire rate
     const baseStats = {
       basic: { damage: 10, fireRate: 1.0 },
       rapid: { damage:  6, fireRate: 2.0 },
@@ -99,7 +99,7 @@ export class Tower {
       this.damageLevel++; this.damage = Math.round(this.damage * 1.25); return true;
     }
     if (kind === 'range' && this.rangeLevel < this.maxUpgradeLevel) {
-      // Range upgrades scale multiplicatively but gently
+      // Gentle multiplicative bump
       this.rangeLevel++;
       this.range = +(this.range * 1.10).toFixed(3); // +10% per range upgrade
       return true;
@@ -110,20 +110,28 @@ export class Tower {
     return false;
   }
 
+  // ---- Targeting helpers ----
+  _inRange(enemy) {
+    const dx = enemy.x - this.x;
+    const dy = enemy.y - this.y;
+    return (dx * dx + dy * dy) <= this.range * this.range;
+  }
+
   // Minimal shooting API expected by Game.js
   update(dt, enemies, projectiles, spatialGrid, projectilePool) {
     this._cooldown -= dt;
     if (this._cooldown > 0) return false;
 
-    // Find a target (prefer spatial grid)
+    // Find a target (prefer spatial grid), but ALWAYS re-check exact distance.
     let target = null;
     if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
+      // Some grid implementations return a “broad” set; we still filter by true circle.
       const candidates = spatialGrid.queryCircle(this.x, this.y, this.range);
-      target = candidates.find(e => !e.isDead && !e.reachedEnd);
+      target = candidates.find(e => !e.isDead && !e.reachedEnd && this._inRange(e));
     } else {
-      target = enemies.find(e => !e.isDead && !e.reachedEnd &&
-        Math.hypot(e.x - this.x, e.y - this.y) <= this.range);
+      target = enemies.find(e => !e.isDead && !e.reachedEnd && this._inRange(e));
     }
+
     if (!target) return false;
 
     // Fire projectile
@@ -158,7 +166,7 @@ export class Tower {
     g.strokeRect(Math.floor(left) + 0.5, Math.floor(top) + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     g.restore();
 
-    // // (Optional) visualize range:
+    // // (Optional) visualize range for quick tuning:
     // g.save();
     // g.strokeStyle = this.color;
     // g.globalAlpha = 0.25;
