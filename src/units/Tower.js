@@ -1,231 +1,129 @@
-import { TILE_SIZE } from '../world/map.js';
-import { Projectile } from './OptimizedProjectile.js';
-
+// src/units/Tower.js
 export class Tower {
-  // ===== Dynamic pricing config & tracking =====
-  static SECOND_BUMP = 0.42; // +42% for every 2 towers bought (per type)
+  // --- Pricing knobs ---
+  static baseCosts = { basic: 50, rapid: 80, heavy: 120 };
+  static priceMul  = { basic: 1.15, rapid: 1.17, heavy: 1.20 };
+
+  // Counts drive price. By default this is "ever built".
   static towerCounts = { basic: 0, rapid: 0, heavy: 0 };
 
-  static STATS = {
-    basic: {
-      range: 140,
-      fireRate: 0.8,
-      damage: 9,
-      cost: 50,
-      color: '#6ea6ff',
-      projectileColor: '#ffd866',
-      projectileSpeed: 250
-    },
-    rapid: {
-      range: 120,
-      fireRate: 2.0,
-      damage: 5,
-      cost: 80,
-      color: '#ff6b6b',
-      projectileColor: '#ff9f43',
-      projectileSpeed: 300
-    },
-    heavy: {
-      range: 180,
-      fireRate: 0.4,
-      damage: 22,
-      cost: 120,
-      color: '#4ecdc4',
-      projectileColor: '#ff6b6b',
-      projectileSpeed: 200
-    }
-  };
-
-  // ---- helpers (normalize + shared lookups)
-  static normalizeType(type) {
-    return (type || 'basic').toLowerCase();
-  }
-  static getTowerStats(type) {
-    const t = Tower.normalizeType(type);
-    return Tower.STATS[t] || Tower.STATS.basic;
-  }
-
-  /** +42% for every 2 towers already owned: 0–1 -> 1.00x, 2–3 -> 1.42x, 4–5 -> 1.84x, ... */
-  static getPriceMultiplier(type, countOverride = null) {
-    const t = Tower.normalizeType(type);
-    const countNow = (countOverride ?? Tower.towerCounts[t] ?? 0);
-    const steps = Math.floor(Math.max(0, countNow) / 2);
-    return 1 + Tower.SECOND_BUMP * steps;
-  }
-
-  /** Price to buy the next tower of this type (given current counts). */
-  static getNextTowerCost(type) {
-    const t = Tower.normalizeType(type);
-    const base = Tower.getTowerStats(t).cost;
-    return Math.floor(base * Tower.getPriceMultiplier(t));
-  }
-
-  /** Preview price after n more purchases (e.g., n=1 = “after this one”). */
-  static getFutureTowerCost(type, n = 1) {
-    const t = Tower.normalizeType(type);
-    const base = Tower.getTowerStats(t).cost;
-    const curr = Tower.towerCounts[t] ?? 0;
-    const mult = Tower.getPriceMultiplier(t, curr + n);
-    return Math.floor(base * mult);
-  }
-
-  /** Call this only after successfully deducting money. */
-  static registerPurchase(type) {
-    const t = Tower.normalizeType(type);
-    Tower.towerCounts[t] = (Tower.towerCounts[t] ?? 0) + 1;
-  }
-
-  /** Reset counts when starting a new game. */
   static resetCounts() {
-    Tower.towerCounts = { basic: 0, rapid: 0, heavy: 0 };
+    this.towerCounts = { basic: 0, rapid: 0, heavy: 0 };
   }
 
-  // ===== Instance =====
-  constructor(tx, ty, type = 'basic', purchaseCost = null) {
-    this.type = Tower.normalizeType(type);
+  static getNextTowerCost(type) {
+    const base = this.baseCosts[type] ?? 0;
+    const mul  = this.priceMul[type]  ?? 1.0;
+    const n    = this.towerCounts[type] ?? 0;
+    // One formula used everywhere (display + charge)
+    return Math.max(1, Math.round(base * Math.pow(mul, n)));
+  }
 
+  static registerPurchase(type) {
+    this.towerCounts[type] = (this.towerCounts[type] ?? 0) + 1;
+  }
+
+  // Optional: call this on sell if you want prices to go back down
+  static deregisterOnSell(type) {
+    const n = (this.towerCounts[type] ?? 0) - 1;
+    this.towerCounts[type] = Math.max(0, n);
+  }
+
+  constructor(tx, ty, type, purchasePrice) {
     this.tx = tx;
     this.ty = ty;
-    this.x = tx * TILE_SIZE + TILE_SIZE / 2;
-    this.y = ty * TILE_SIZE + TILE_SIZE / 2;
+    this.type = type;
 
-    // Stats from table
-    const stats = Tower.getTowerStats(this.type);
-    this.baseRange = stats.range;
-    this.baseFireRate = stats.fireRate;
-    this.baseDamage = stats.damage;
-    this.baseCost = stats.cost;
-    this.color = stats.color;
-    this.projectileColor = stats.projectileColor;
-    this.projectileSpeed = stats.projectileSpeed;
+    // DO NOT increment counts here (avoid double-increment).
+    // Store price actually paid so UI/sell value are consistent.
+    this.purchasePrice = Number.isFinite(purchasePrice)
+      ? purchasePrice
+      : Tower.getNextTowerCost(type);
 
-    // Upgrade levels
+    // example baseline stats per type (adjust to your game)
+    const stats = {
+      basic: { range: 100, damage: 10, fireRate: 1.0 },
+      rapid: { range: 90,  damage: 6,  fireRate: 2.0 },
+      heavy: { range: 120, damage: 20, fireRate: 0.6 },
+    }[type] || { range: 90, damage: 8, fireRate: 1.0 };
+
+    this.range = stats.range;
+    this.damage = stats.damage;
+    this.fireRate = stats.fireRate;
+
+    // upgrade tracking
+    this.maxUpgradeLevel = 5;
     this.damageLevel = 0;
     this.rangeLevel = 0;
     this.fireRateLevel = 0;
-    this.maxUpgradeLevel = 3;
 
-    // Current stats (base + upgrades)
-    this.range = this.baseRange;
-    this.fireRate = this.baseFireRate;
-    this.damage = this.baseDamage;
-
-    // What you actually paid for this tower
-    const paid = (purchaseCost != null) ? purchaseCost : Tower.getNextTowerCost(this.type);
-    this.cost = paid;
-    this.totalCost = paid;
-
-    this.cooldown = 0;
+    this._cooldown = 0;
   }
 
-  // ---- upgrades
-  getUpgradeCost(upgradeType) {
-    const baseMultiplier = { basic: 1.0, rapid: 1.2, heavy: 1.5 };
-    const multiplier = baseMultiplier[this.type] || 1.0;
-    const level = this[`${upgradeType}Level`];
-    if (level >= this.maxUpgradeLevel) return Infinity;
-    return Math.floor(this.baseCost * multiplier * (level + 1) * Math.pow(1.5, level));
-  }
-
-  upgrade(upgradeType) {
-    const level = this[`${upgradeType}Level`];
-    if (level >= this.maxUpgradeLevel) return false;
-    const cost = this.getUpgradeCost(upgradeType);
-    this.totalCost += cost;
-    this[`${upgradeType}Level`] = level + 1;
-    this.applyUpgrades();
-    return true;
-  }
-
-  applyUpgrades() {
-    this.damage = Math.floor(this.baseDamage * (1 + this.damageLevel * 0.25)); // +25%/lvl
-    this.range  = Math.floor(this.baseRange  * (1 + this.rangeLevel  * 0.15)); // +15%/lvl
-    this.fireRate = this.baseFireRate * (1 + this.fireRateLevel * 0.20);       // +20%/lvl
-  }
-
-  getTotalUpgradeLevel() {
-    return this.damageLevel + this.rangeLevel + this.fireRateLevel;
-  }
-  canUpgrade() {
-    return this.getTotalUpgradeLevel() < (this.maxUpgradeLevel * 3);
-  }
+  // Example sell formula
   getSellValue() {
-    return Math.floor(this.totalCost * 0.6);
+    return Math.floor(this.purchasePrice * 0.75);
   }
 
-  // ---- runtime
-  update(dt, enemies, projectiles, spatialGrid, projectilePool) {
-    this.cooldown -= dt;
-    if (this.cooldown > 0) return false;
+  // Example upgrade costs (use same rounding everywhere)
+  getUpgradeCost(kind) {
+    const base = 30;
+    const lvl = kind === 'damage' ? this.damageLevel
+              : kind === 'range'  ? this.rangeLevel
+              : kind === 'fireRate' ? this.fireRateLevel : 0;
+    return Math.round(base * Math.pow(1.25, lvl));
+  }
 
-    let best = null;
-    let bestDist = 0;
-    const nearby = spatialGrid ? spatialGrid.getNearby(this.x, this.y, this.range) : enemies;
-
-    for (const e of nearby) {
-      if (e.isDead || e.reachedEnd) continue;
-      const d = Math.hypot(e.x - this.x, e.y - this.y);
-      if (d <= this.range) {
-        const score = e._sIndex ?? 0;
-        if (best === null || score > bestDist) {
-          best = e;
-          bestDist = score;
-        }
-      }
+  upgrade(kind) {
+    if (kind === 'damage' && this.damageLevel < this.maxUpgradeLevel) {
+      this.damageLevel++; this.damage = Math.round(this.damage * 1.25); return true;
     }
-
-    if (best) {
-      const p = projectilePool.get();
-      p.init(this.x, this.y, best, this.damage, this.projectileSpeed, this.projectileColor);
-      projectiles.push(p);
-      this.cooldown = 1 / this.fireRate;
-      return true;
+    if (kind === 'range' && this.rangeLevel < this.maxUpgradeLevel) {
+      this.rangeLevel++; this.range = Math.round(this.range * 1.15); return true;
+    }
+    if (kind === 'fireRate' && this.fireRateLevel < this.maxUpgradeLevel) {
+      this.fireRateLevel++; this.fireRate = +(this.fireRate * 1.20).toFixed(3); return true;
     }
     return false;
   }
 
-  render(g) {
-    // base
-    g.fillStyle = this.color;
-    g.fillRect(this.tx * TILE_SIZE + 8, this.ty * TILE_SIZE + 8, TILE_SIZE - 16, TILE_SIZE - 16);
+  // Minimal shooting API expected by Game.js
+  update(dt, enemies, projectiles, spatialGrid, projectilePool) {
+    this._cooldown -= dt;
+    if (this._cooldown > 0) return false;
 
-    // tower center
-    g.beginPath();
-    g.fillStyle = this.color;
-    g.arc(this.x, this.y, 14, 0, Math.PI * 2);
-    g.fill();
-
-    // tower outline
-    g.strokeStyle = '#ffffff';
-    g.lineWidth = 2;
-    g.beginPath();
-    g.arc(this.x, this.y, 14, 0, Math.PI * 2);
-    g.stroke();
-
-    // type indicator
-    g.fillStyle = '#ffffff';
-    g.font = 'bold 12px system-ui';
-    g.textAlign = 'center';
-    g.fillText(this.type.charAt(0).toUpperCase(), this.x, this.y + 4);
-
-    // upgrade indicators
-    const totalLevel = this.getTotalUpgradeLevel();
-    if (totalLevel > 0) {
-      g.fillStyle = '#ffd700';
-      g.font = 'bold 8px system-ui';
-      g.textAlign = 'center';
-      g.fillText(totalLevel.toString(), this.x, this.y - 20);
-
-      const dotRadius = 2;
-      const dotDistance = 18;
-      for (let i = 0; i < totalLevel && i < 9; i++) {
-        const angle = (i / Math.max(totalLevel, 1)) * Math.PI * 2;
-        const dotX = this.x + Math.cos(angle) * dotDistance;
-        const dotY = this.y + Math.sin(angle) * dotDistance;
-        g.beginPath();
-        g.arc(dotX, dotY, dotRadius, 0, Math.PI * 2);
-        g.fill();
-      }
+    // Find a target (via grid if provided)
+    let target = null;
+    if (spatialGrid && spatialGrid.queryCircle) {
+      const candidates = spatialGrid.queryCircle(this.tx * 32 + 16, this.ty * 32 + 16, this.range);
+      target = candidates.find(e => !e.isDead && !e.reachedEnd);
+    } else {
+      target = enemies.find(e => !e.isDead && !e.reachedEnd &&
+        Math.hypot(e.x - (this.tx * 32 + 16), e.y - (this.ty * 32 + 16)) <= this.range);
     }
+
+    if (!target) return false;
+
+    const px = this.tx * 32 + 16, py = this.ty * 32 + 16;
+    const p = projectilePool ? projectilePool.get() : null;
+    if (p) {
+      p.init(px, py, target, this.damage);
+      projectiles.push(p);
+    } else {
+      projectiles.push({ x: px, y: py, target, damage: this.damage, speed: 250, done: false, hitTarget: false });
+    }
+
+    this._cooldown = 1 / this.fireRate;
+    return true;
+  }
+
+  render(g) {
+    g.fillStyle = '#3498db';
+    g.fillRect(this.tx * 32 + 6, this.ty * 32 + 6, 20, 20);
+  }
+
+  // (optional) call on sell if you want cost to drop back
+  onSold() {
+    // Tower.deregisterOnSell(this.type);
   }
 }
