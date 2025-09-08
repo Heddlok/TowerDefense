@@ -6,21 +6,17 @@ export class Enemy {
 
   reset() {
     this.type = 'basic';
-    this.x = 0; this.y = 0;           // ALWAYS PIXELS (center)
-    this.w = TILE_SIZE * 0.8;         // for render/centering if needed
-    this.h = TILE_SIZE * 0.8;
-
-    this.maxHp = 1;
-    this.hp = 1;
-    this.speed = 60;                   // px/s
-    this.reward = 1;
+    this.x = 0; this.y = 0;            // ALWAYS pixels (center)
+    this.maxHp = 1; this.hp = 1;
+    this.speed = 70;                   // px/s
+    this.reward = 5;
 
     this.isDead = false;
     this.reachedEnd = false;
 
     this.path = null;                  // array of {x,y} in TILES
-    this.seg = 0;                      // moving from path[seg-1] -> path[seg]
-    this._tx = 0; this._ty = 0;        // current target (pixels)
+    this.seg = 0;                      // index of target tile (moving seg-1 -> seg)
+    this._tx = 0; this._ty = 0;        // current target in pixels
   }
 
   _tileCenterPx(t) {
@@ -29,14 +25,11 @@ export class Enemy {
 
   setPath(path) {
     this.path = Array.isArray(path) ? path : null;
-    if (!this.path || this.path.length < 2) {
-      this.reachedEnd = true;
-      return;
-    }
+    if (!this.path || this.path.length < 2) { this.reachedEnd = true; return; }
     const a = this._tileCenterPx(this.path[0]);
     const b = this._tileCenterPx(this.path[1]);
-    this.x = a.x; this.y = a.y;        // start in PIXELS
-    this.seg = 1;
+    this.x = a.x; this.y = a.y;        // spawn at first node (pixels)
+    this.seg = 1;                      // head to node #1
     this._tx = b.x; this._ty = b.y;
   }
 
@@ -45,8 +38,8 @@ export class Enemy {
     this.type = type || 'basic';
 
     const base = {
-      basic: { hp: 30,  speed: 70,  reward: 5 },
-      fast:  { hp: 20,  speed: 120, reward: 6 },
+      basic: { hp: 30,  speed: 70,  reward: 5  },
+      fast:  { hp: 20,  speed: 120, reward: 6  },
       tank:  { hp: 120, speed: 45,  reward: 10 },
     }[this.type] || { hp: 30, speed: 70, reward: 5 };
 
@@ -65,41 +58,31 @@ export class Enemy {
   takeDamage(dmg) {
     const d = Number.isFinite(dmg) ? Math.max(0, dmg) : 0;
     this.hp -= d;
-    if (this.hp <= 0) {
-      this.hp = 0; this.isDead = true;
-      return true;
-    }
+    if (this.hp <= 0) { this.hp = 0; this.isDead = true; return true; }
     return false;
   }
 
   update(dt, pathFromCaller) {
     if (this.isDead || this.reachedEnd) return;
-
     if (!this.path) {
       if (pathFromCaller) this.setPath(pathFromCaller);
       if (!this.path) return;
     }
 
-    // Move toward current target (pixel)
     const dx = this._tx - this.x;
     const dy = this._ty - this.y;
     const dist = Math.hypot(dx, dy);
 
     if (dist <= 0.0001) {
-      // advance to next node
       this.seg++;
       if (this.seg >= this.path.length) { this.reachedEnd = true; return; }
       const n = this._tileCenterPx(this.path[this.seg]);
       this._tx = n.x; this._ty = n.y;
-      return; // step next frame
-    }
-
-    const step = this.speed * dt;
-    if (step >= dist) {
-      this.x = this._tx; this.y = this._ty;
       return;
     }
 
+    const step = this.speed * dt;
+    if (step >= dist) { this.x = this._tx; this.y = this._ty; return; }
     this.x += (dx / dist) * step;
     this.y += (dy / dist) * step;
   }
@@ -112,18 +95,13 @@ export class Enemy {
     g.fill();
 
     // HP bar
-    const bw = 22, bh = 4, yOff = 16;
-    const frac = this.maxHp ? Math.max(0, this.hp / this.maxHp) : 0;
-    g.fillStyle = '#2b2b2b';
-    g.fillRect(this.x - bw/2, this.y - yOff, bw, bh);
-    g.fillStyle = '#3ecf8e';
-    g.fillRect(this.x - bw/2, this.y - yOff, bw * frac, bh);
+    const bw = 22, bh = 4, yOff = 16, frac = this.maxHp ? Math.max(0, this.hp / this.maxHp) : 0;
+    g.fillStyle = '#2b2b2b'; g.fillRect(this.x - bw/2, this.y - yOff, bw, bh);
+    g.fillStyle = '#3ecf8e'; g.fillRect(this.x - bw/2, this.y - yOff, bw * frac, bh);
 
     // Label
-    g.fillStyle = '#fff';
-    g.font = '10px system-ui, -apple-system';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
+    g.fillStyle = '#fff'; g.font = '10px system-ui, -apple-system';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText((this.type[0] || 'B').toUpperCase(), this.x, this.y);
     g.restore();
   }
