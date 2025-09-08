@@ -69,6 +69,15 @@ export class Tower {
     return stats[type] || stats.basic;
   }
 
+  // Static method to reset tower counts (call when starting new game)
+  static resetCounts() {
+    Tower.towerCounts = {
+      basic: 0,
+      rapid: 0,
+      heavy: 0
+    };
+  }
+
   // Calculate upgrade cost based on tower type and current level
   getUpgradeCost(upgradeType) {
     const baseMultiplier = {
