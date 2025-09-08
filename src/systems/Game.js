@@ -255,6 +255,25 @@ export class Game {
     const disable = this.gameOver === true;
     const sellBtn = document.getElementById('sellModeBtn');
     if (sellBtn) sellBtn.disabled = disable;
+
+    // ---- LIVE COST READOUTS (fix for "Cost: 50" stuck UI) ----
+    // Single selected-tower cost (element id="cost")
+    const costEl = document.getElementById('cost');
+    if (costEl) {
+      if (this.selectedTowerType) {
+        costEl.textContent = `Cost: ${Tower.getNextTowerCost(this.selectedTowerType)}`;
+      } else {
+        costEl.textContent = 'Cost: —';
+      }
+    }
+
+    // Optional per-type cost spans if present
+    const bc = document.getElementById('basicCost');
+    const rc = document.getElementById('rapidCost');
+    const hc = document.getElementById('heavyCost');
+    if (bc) bc.textContent = String(Tower.getNextTowerCost('basic'));
+    if (rc) rc.textContent = String(Tower.getNextTowerCost('rapid'));
+    if (hc) hc.textContent = String(Tower.getNextTowerCost('heavy'));
   }
 
   startWave() {
