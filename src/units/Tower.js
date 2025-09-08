@@ -41,7 +41,7 @@ export class Tower {
       basic: {
         range: 140,
         fireRate: 0.8,
-        damage: 15,
+        damage: 9, // Reduced from 15 (15 * 0.63 ≈ 9)
         cost: 50,
         color: '#6ea6ff',
         projectileColor: '#ffd866',
@@ -50,7 +50,7 @@ export class Tower {
       rapid: {
         range: 120,
         fireRate: 2.0,
-        damage: 8,
+        damage: 5, // Reduced from 8 (8 * 0.63 ≈ 5)
         cost: 80,
         color: '#ff6b6b',
         projectileColor: '#ff9f43',
@@ -59,7 +59,7 @@ export class Tower {
       heavy: {
         range: 180,
         fireRate: 0.4,
-        damage: 35,
+        damage: 22, // Reduced from 35 (35 * 0.63 ≈ 22)
         cost: 120,
         color: '#4ecdc4',
         projectileColor: '#ff6b6b',
@@ -212,6 +212,3 @@ export class Tower {
     
   }
 }
-
-
-

@@ -208,6 +208,27 @@ export class Game {
     }
   }
 
+  // Helper method to get dynamic cost for a tower type
+  getTowerCost(towerType) {
+    // Count towers of the same type already built
+    const sameTypeTowers = this.towers.filter(t => t.type === towerType).length;
+    
+    // Base costs
+    const baseCosts = {
+      basic: 50,
+      rapid: 80,
+      heavy: 120
+    };
+    
+    const baseCost = baseCosts[towerType] || 50;
+    
+    // Increase cost by 33% every 2nd tower of same type
+    const priceIncrements = Math.floor(sameTypeTowers / 2);
+    const multiplier = Math.pow(1.33, priceIncrements);
+    
+    return Math.round(baseCost * multiplier);
+  }
+
   updateUI() {
     document.getElementById('money').textContent = String(this.money);
     document.getElementById('lives').textContent = String(this.lives);
@@ -222,10 +243,32 @@ export class Game {
     const stats = this.perfMonitor.getStats();
     document.getElementById('fps').textContent = String(stats.fps);
 
+    // Update tower button costs dynamically
+    const basicBtn = document.getElementById('basicTowerBtn');
+    const rapidBtn = document.getElementById('rapidTowerBtn');
+    const heavyBtn = document.getElementById('heavyTowerBtn');
+    
+    if (basicBtn) {
+      const basicCost = this.getTowerCost('basic');
+      basicBtn.textContent = `Basic ($${basicCost})`;
+      basicBtn.disabled = this.gameOver || this.money < basicCost;
+    }
+    
+    if (rapidBtn) {
+      const rapidCost = this.getTowerCost('rapid');
+      rapidBtn.textContent = `Rapid ($${rapidCost})`;
+      rapidBtn.disabled = this.gameOver || this.money < rapidCost;
+    }
+    
+    if (heavyBtn) {
+      const heavyCost = this.getTowerCost('heavy');
+      heavyBtn.textContent = `Heavy ($${heavyCost})`;
+      heavyBtn.disabled = this.gameOver || this.money < heavyCost;
+    }
+
     const disable = this.gameOver === true;
     const sellBtn = document.getElementById('sellModeBtn');
     if (sellBtn) sellBtn.disabled = disable;
-    document.querySelectorAll('.tower-btn').forEach(b => { b.disabled = disable; });
   }
 
   startWave() {
@@ -431,9 +474,8 @@ export class Game {
     if (isOnPath(tx, ty, this.path)) return; // cannot build on path
     if (this.towers.some(t => t.tx === tx && t.ty === ty)) return; // occupied
 
-    // Get cost for selected tower type
-    const tempTower = new Tower(0, 0, this.selectedTowerType);
-    const cost = tempTower.cost;
+    // Get dynamic cost for selected tower type
+    const cost = this.getTowerCost(this.selectedTowerType);
     if (this.money < cost) return;
 
     this.money -= cost;
