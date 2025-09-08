@@ -52,10 +52,10 @@ export class Tower {
     // Stats (baseline tuned for 32px tiles; scale to current TILE_SIZE)
     const RANGE_SCALE = TILE_SIZE / 32;
     const baseStats = {
-      basic: { range: 100, damage: 10, fireRate: 1.0 },
-      rapid: { range:  90, damage:  6, fireRate: 2.0 },
-      heavy: { range: 120, damage: 20, fireRate: 0.6 },
-    }[type] || { range: 90, damage: 8, fireRate: 1.0 };
+      basic: { range: 80, damage: 10, fireRate: 1.0 },
+      rapid: { range:  40, damage:  6, fireRate: 2.0 },
+      heavy: { range: 20, damage: 20, fireRate: 0.6 },
+    }[type] || { range: 80, damage: 8, fireRate: 1.0 };
 
     this.range    = (baseStats.range ?? 96) * RANGE_SCALE * RANGE_TWEAK; // pixels
     this.damage   = baseStats.damage ?? 8;
