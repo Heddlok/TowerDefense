@@ -54,8 +54,16 @@ export class Game {
     // Reset tower counts when starting a new game
     Tower.resetCounts();
 
+    // Events
     canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
     canvas.addEventListener('click', (e) => this.onClick(e));
+
+    // Ensure hover tooltip never blocks clicks/taps
+    const hi = document.getElementById('hoverInfo');
+    if (hi) {
+      hi.style.pointerEvents = 'none';
+      hi.style.userSelect = 'none';
+    }
   }
 
   update(ts) {
@@ -256,8 +264,7 @@ export class Game {
     const sellBtn = document.getElementById('sellModeBtn');
     if (sellBtn) sellBtn.disabled = disable;
 
-    // ---- LIVE COST READOUTS (fix for "Cost: 50" stuck UI) ----
-    // Single selected-tower cost (element id="cost")
+    // ---- LIVE COST READOUTS ----
     const costEl = document.getElementById('cost');
     if (costEl) {
       if (this.selectedTowerType) {
@@ -266,8 +273,6 @@ export class Game {
         costEl.textContent = 'Cost: —';
       }
     }
-
-    // Optional per-type cost spans if present
     const bc = document.getElementById('basicCost');
     const rc = document.getElementById('rapidCost');
     const hc = document.getElementById('heavyCost');
@@ -309,7 +314,7 @@ export class Game {
     this.spawning = true;
 
     const pickType = () => {
-      if (this.wave <= 3) return 'basic'; // HARD GUARD (prevents any accidental variety)
+      if (this.wave <= 3) return 'basic'; // HARD GUARD
       const a = Math.max(0, weights.basic || 0);
       const b = Math.max(0, weights.fast  || 0);
       const c = Math.max(0, weights.tank  || 0);
@@ -324,7 +329,7 @@ export class Game {
 
       // Decide type and spawn
       let type = pickType();
-      if (this.wave <= 3) type = 'basic'; // REDUNDANT HARD GUARD (belt-and-suspenders)
+      if (this.wave <= 3) type = 'basic'; // redundant guard
 
       const enemy = this.enemyPool.get();
       enemy.init(type, scaling);           // Enemy.js accepts scaling
@@ -439,6 +444,10 @@ export class Game {
     const hoverInfo = document.getElementById('hoverInfo');
 
     if (hoverInfo) {
+      // make absolutely sure the tooltip never blocks pointer events
+      hoverInfo.style.pointerEvents = 'none';
+      hoverInfo.style.userSelect = 'none';
+
       if (this.selectedTowerType) {
         hoverInfo.style.display = 'block';
         hoverInfo.style.left = `${mx + 12}px`;
