@@ -54,10 +54,10 @@ export class Tower {
     const RANGE_SCALE = TILE_SIZE / 32;
 
     const baseStats = {
-      basic: { range: 100, damage: 10, fireRate: 1.0 },
-      rapid: { range:  90, damage:  6, fireRate: 2.0 },
-      heavy: { range: 120, damage: 20, fireRate: 0.6 },
-    }[type] || { range: 90, damage: 8, fireRate: 1.0 };
+      basic: { range: 30, damage: 10, fireRate: 1.0 },
+      rapid: { range:  30, damage:  6, fireRate: 2.0 },
+      heavy: { range: 10, damage: 20, fireRate: 0.6 },
+    }[type] || { range: 30, damage: 8, fireRate: 1.0 };
 
     this.range    = (baseStats.range ?? 96) * RANGE_SCALE; // pixels
     this.damage   = baseStats.damage ?? 8;
