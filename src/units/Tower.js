@@ -1,4 +1,6 @@
 // src/units/Tower.js
+import { TILE_SIZE } from '../world/map.js';
+
 export class Tower {
   // --- Pricing knobs ---
   static baseCosts = { basic: 50, rapid: 80, heavy: 120 };
@@ -15,7 +17,6 @@ export class Tower {
     const base = this.baseCosts[type] ?? 0;
     const mul  = this.priceMul[type]  ?? 1.0;
     const n    = this.towerCounts[type] ?? 0;
-    // One formula used everywhere (display + charge)
     return Math.max(1, Math.round(base * Math.pow(mul, n)));
   }
 
@@ -23,7 +24,6 @@ export class Tower {
     this.towerCounts[type] = (this.towerCounts[type] ?? 0) + 1;
   }
 
-  // Optional: call this on sell if you want prices to go back down
   static deregisterOnSell(type) {
     const n = (this.towerCounts[type] ?? 0) - 1;
     this.towerCounts[type] = Math.max(0, n);
@@ -34,22 +34,27 @@ export class Tower {
     this.ty = ty;
     this.type = type;
 
-    // DO NOT increment counts here (avoid double-increment).
-    // Store price actually paid so UI/sell value are consistent.
+    // Price actually paid (shown in UI / used for sell value)
     this.purchasePrice = Number.isFinite(purchasePrice)
       ? purchasePrice
       : Tower.getNextTowerCost(type);
 
-    // example baseline stats per type (adjust to your game)
-    const stats = {
+    // Convert to world pixels once and use everywhere
+    this.x = tx * TILE_SIZE + TILE_SIZE / 2;
+    this.y = ty * TILE_SIZE + TILE_SIZE / 2;
+
+    // Stats tuned originally around 32px tiles; scale them to current TILE_SIZE
+    const RANGE_SCALE = TILE_SIZE / 32;
+
+    const baseStats = {
       basic: { range: 100, damage: 10, fireRate: 1.0 },
-      rapid: { range: 90,  damage: 6,  fireRate: 2.0 },
+      rapid: { range:  90, damage:  6, fireRate: 2.0 },
       heavy: { range: 120, damage: 20, fireRate: 0.6 },
     }[type] || { range: 90, damage: 8, fireRate: 1.0 };
 
-    this.range = stats.range;
-    this.damage = stats.damage;
-    this.fireRate = stats.fireRate;
+    this.range    = (baseStats.range ?? 96) * RANGE_SCALE; // pixels
+    this.damage   = baseStats.damage ?? 8;
+    this.fireRate = baseStats.fireRate ?? 1.0;
 
     // upgrade tracking
     this.maxUpgradeLevel = 5;
@@ -65,7 +70,7 @@ export class Tower {
     return Math.floor(this.purchasePrice * 0.75);
   }
 
-  // Example upgrade costs (use same rounding everywhere)
+  // Example upgrade costs
   getUpgradeCost(kind) {
     const base = 30;
     const lvl = kind === 'damage' ? this.damageLevel
@@ -92,25 +97,28 @@ export class Tower {
     this._cooldown -= dt;
     if (this._cooldown > 0) return false;
 
-    // Find a target (via grid if provided)
+    // Find a target (use grid if available)
     let target = null;
-    if (spatialGrid && spatialGrid.queryCircle) {
-      const candidates = spatialGrid.queryCircle(this.tx * 32 + 16, this.ty * 32 + 16, this.range);
+    if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
+      const candidates = spatialGrid.queryCircle(this.x, this.y, this.range);
       target = candidates.find(e => !e.isDead && !e.reachedEnd);
     } else {
       target = enemies.find(e => !e.isDead && !e.reachedEnd &&
-        Math.hypot(e.x - (this.tx * 32 + 16), e.y - (this.ty * 32 + 16)) <= this.range);
+        Math.hypot(e.x - this.x, e.y - this.y) <= this.range);
     }
 
     if (!target) return false;
 
-    const px = this.tx * 32 + 16, py = this.ty * 32 + 16;
     const p = projectilePool ? projectilePool.get() : null;
-    if (p) {
-      p.init(px, py, target, this.damage);
+    if (p && typeof p.init === 'function') {
+      p.init(this.x, this.y, target, this.damage);
       projectiles.push(p);
     } else {
-      projectiles.push({ x: px, y: py, target, damage: this.damage, speed: 250, done: false, hitTarget: false });
+      projectiles.push({
+        x: this.x, y: this.y, target,
+        damage: this.damage, speed: 250,
+        done: false, hitTarget: false
+      });
     }
 
     this._cooldown = 1 / this.fireRate;
@@ -118,11 +126,23 @@ export class Tower {
   }
 
   render(g) {
+    const size = Math.floor(TILE_SIZE * 0.6);
+    const half = size / 2;
+
+    g.save();
     g.fillStyle = '#3498db';
-    g.fillRect(this.tx * 32 + 6, this.ty * 32 + 6, 20, 20);
+    g.fillRect(this.x - half, this.y - half, size, size);
+    g.restore();
+
+    // (Optional) draw range for debugging:
+    // g.save();
+    // g.strokeStyle = 'rgba(77,182,255,0.25)';
+    // g.beginPath();
+    // g.arc(this.x, this.y, this.range, 0, Math.PI * 2);
+    // g.stroke();
+    // g.restore();
   }
 
-  // (optional) call on sell if you want cost to drop back
   onSold() {
     // Tower.deregisterOnSell(this.type);
   }
