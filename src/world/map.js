@@ -19,37 +19,44 @@ export function createPath() {
   return nodes;
 }
 
-// --- Exact path rasterization to tile mask (Bresenham) ---
+// --- Exact path rasterization to tile mask (Manhattan) ---
 const _k = (x, y) => `${x},${y}`;
 
-export function rasterizePathToMask(pathNodes) {
+function rasterizePathToMask(path) {
   const mask = new Set();
-  const nodes = Array.isArray(pathNodes) ? pathNodes : [];
-  if (nodes.length < 2) return mask;
+  if (!Array.isArray(path) || path.length < 2) return mask;
 
   const xi = (p) => (p && typeof p.x === 'number' ? (p.x | 0) : 0);
   const yi = (p) => (p && typeof p.y === 'number' ? (p.y | 0) : 0);
 
-  for (let i = 0; i < nodes.length - 1; i++) {
-    let x0 = xi(nodes[i]),     y0 = yi(nodes[i]);
-    const x1 = xi(nodes[i+1]), y1 = yi(nodes[i+1]);
+  const add = (x, y) => mask.add(_k(x | 0, y | 0));
 
-    const dx = Math.abs(x1 - x0);
-    const dy = Math.abs(y1 - y0);
+  for (let i = 0; i < path.length - 1; i++) {
+    let x0 = xi(path[i]),     y0 = yi(path[i]);
+    const x1 = xi(path[i+1]), y1 = yi(path[i+1]);
+
     const sx = x0 < x1 ? 1 : -1;
     const sy = y0 < y1 ? 1 : -1;
-    let err = dx - dy;
 
-    while (true) {
-      mask.add(_k(x0, y0));
-      if (x0 === x1 && y0 === y1) break;
-      const e2 = 2 * err;
-      if (e2 > -dy) { err -= dy; x0 += sx; }
-      if (e2 <  dx) { err += dx; y0 += sy; }
+    if (x0 === x1) {
+      // vertical
+      for (let y = y0; y !== y1; y += sy) add(x0, y);
+      add(x1, y1);
+    } else if (y0 === y1) {
+      // horizontal
+      for (let x = x0; x !== x1; x += sx) add(x, y0);
+      add(x1, y1);
+    } else {
+      // L-shape: first horizontal, then vertical (avoids diagonal bleed)
+      for (let x = x0; x !== x1; x += sx) add(x, y0);
+      add(x1, y0);
+      for (let y = y0; y !== y1; y += sy) add(x1, y);
+      add(x1, y1);
     }
   }
   return mask;
 }
+
 
 /**
  * Backwards-compatible helper:

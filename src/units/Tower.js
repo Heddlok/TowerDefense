@@ -6,27 +6,31 @@ export class Tower {
   static baseCosts = { basic: 50, rapid: 80, heavy: 120 };
   static priceMul  = { basic: 1.15, rapid: 1.17, heavy: 1.20 };
 
+  // Counts drive price (ever built per type).
+  static towerCounts = { basic: 0, rapid: 0, heavy: 0 };
+  static resetCounts() { this.towerCounts = { basic: 0, rapid: 0, heavy: 0 }; }
+
+  // PRICE RAMP: increase only every 2nd purchase (pairwise ramp)
+  static getNextTowerCost(type) {
+    const base = this.baseCosts[type] ?? 0;
+    const mul  = this.priceMul[type]  ?? 1.0;
+    const n    = this.towerCounts[type] ?? 0;      // how many already bought
+    const steps = Math.floor(n / 2);               // bump price every 2 towers
+    return Math.max(1, Math.round(base * Math.pow(mul, steps)));
+  }
+
+  static registerPurchase(type) { this.towerCounts[type] = (this.towerCounts[type] ?? 0) + 1; }
+  static deregisterOnSell(type) {
+    const n = (this.towerCounts[type] ?? 0) - 1;
+    this.towerCounts[type] = Math.max(0, n);
+  }
+
   // Visuals per type
   static colors = {
     basic: '#4DB6FF', // blue
     rapid: '#66BB6A', // green
     heavy: '#FFB74D', // orange
   };
-
-  // Counts drive price.
-  static towerCounts = { basic: 0, rapid: 0, heavy: 0 };
-  static resetCounts() { this.towerCounts = { basic: 0, rapid: 0, heavy: 0 }; }
-  static getNextTowerCost(type) {
-    const base = this.baseCosts[type] ?? 0;
-    const mul  = this.priceMul[type]  ?? 1.0;
-    const n    = this.towerCounts[type] ?? 0;
-    return Math.max(1, Math.round(base * Math.pow(mul, n)));
-  }
-  static registerPurchase(type) { this.towerCounts[type] = (this.towerCounts[type] ?? 0) + 1; }
-  static deregisterOnSell(type) {
-    const n = (this.towerCounts[type] ?? 0) - 1;
-    this.towerCounts[type] = Math.max(0, n);
-  }
 
   constructor(tx, ty, type, purchasePrice) {
     this.tx = tx;
@@ -37,11 +41,11 @@ export class Tower {
       ? purchasePrice
       : Tower.getNextTowerCost(type);
 
-    // Pixel-space center of this tile
+    // Pixel center of tile
     this.x = tx * TILE_SIZE + TILE_SIZE / 2;
     this.y = ty * TILE_SIZE + TILE_SIZE / 2;
 
-    // Scale range from a 32px baseline to current TILE_SIZE
+    // Stats (scaled from 32px baseline)
     const RANGE_SCALE = TILE_SIZE / 32;
     const baseStats = {
       basic: { range: 100, damage: 10, fireRate: 1.0 },
@@ -58,7 +62,7 @@ export class Tower {
     // Upgrades
     this.maxUpgradeLevel = 5;
     this.damageLevel = 0;
-    this.rangeLevel = 0;
+    this.rangeLevel  = 0;
     this.fireRateLevel = 0;
 
     this._cooldown = 0;
@@ -91,7 +95,7 @@ export class Tower {
     this._cooldown -= dt;
     if (this._cooldown > 0) return false;
 
-    // Acquire target
+    // Target acquisition
     let target = null;
     if (spatialGrid?.queryCircle) {
       const candidates = spatialGrid.queryCircle(this.x, this.y, this.range);
@@ -115,7 +119,7 @@ export class Tower {
   }
 
   render(g) {
-    // Fill the ENTIRE tile this tower occupies
+    // Fill entire tile
     const left = this.x - TILE_SIZE / 2;
     const top  = this.y - TILE_SIZE / 2;
 
@@ -123,21 +127,11 @@ export class Tower {
     g.fillStyle = this.color;
     g.fillRect(left, top, TILE_SIZE, TILE_SIZE);
 
-    // Optional subtle border for readability
+    // Optional subtle border
     g.strokeStyle = 'rgba(0,0,0,0.35)';
     g.lineWidth = 2;
-    // 0.5 offsets reduce blurry edges on 1px strokes
     g.strokeRect(Math.floor(left) + 0.5, Math.floor(top) + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     g.restore();
-
-    // // (Optional) draw range for debugging:
-    // g.save();
-    // g.strokeStyle = this.color;
-    // g.globalAlpha = 0.25;
-    // g.beginPath();
-    // g.arc(this.x, this.y, this.range, 0, Math.PI * 2);
-    // g.stroke();
-    // g.restore();
   }
 
   onSold() {
