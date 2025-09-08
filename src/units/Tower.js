@@ -1,5 +1,5 @@
 // src/units/Tower.js
-import { TILE_SIZE } from '../world/map.js';
+import { TILE_SIZE, GRID_COLS, GRID_ROWS } from '../world/map.js';
 import { Projectile } from './OptimizedProjectile.js';
 
 // Global multiplier for all ranges
@@ -75,22 +75,70 @@ export class Tower {
     return false;
   }
 
-  _inRange(e) {
-    const dx = e.x - this.x, dy = e.y - this.y;
-    return (dx*dx + dy*dy) <= this.range2;
+  _inRange(enemy) {
+    const ex = enemy?.x, ey = enemy?.y;
+    if (!Number.isFinite(ex) || !Number.isFinite(ey)) return false;
+
+    let dx = ex - this.x, dy = ey - this.y;
+    let d2 = dx * dx + dy * dy;
+    const r2 = this.range * this.range;
+
+    if (d2 <= r2) return true;
+
+    const looksTileSpace =
+      ex >= 0 && ey >= 0 &&
+      ex < GRID_COLS && ey < GRID_ROWS &&
+      Math.abs(ex - Math.round(ex)) < 1e-3 &&
+      Math.abs*(ey - Math.round(ey)) < 1e-3;
+
+    if (looksTileSpace) {
+      const px = ex * TILE_SIZE + TILE_SIZE / 2;
+      const py = ey * TILE_SIZE + TILE_SIZE / 2;
+      dx = px - this.x; dy = py - this.py;
+      d2 = dx * dx + dy * dy;
+      return d2 <= r2;
+    }
+    return false;
   }
 
-  _acquireTarget(enemies) {
-    let best = null, bestD2 = Infinity;
-    for (let i = 0; i < enemies.length; i++) {
-      const e = enemies[i];
-      if (!e || e.isDead || e.reachedEnd) continue;
-      const dx = e.x - this.x, dy = e.y - this.y;
-      const d2 = dx*dx + dy*dy;
-      if (d2 <= this.range2 && d2 < bestD2) { best = e; bestD2 = d2; }
+  _acquireTarget(enemies, spatialGrid) {
+    let candidates = enemies;
+
+    if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
+      const list = spatialGrid.queryCircle(this.x, this.y, this.range);
+      if (Array.isArray(list) && list.length > 0 ) {
+        candidates = list;
     }
-    return best;
   }
+
+  let best = null, bestD2 = Infinity;
+  const r2 = this.range * this.range;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const e = candidates[i];
+    if (!e || e.isDead || e.reachedEnd) continue;
+
+    const ex = e.x, ey = e.y;
+    if (!Number.isFinite(ex) || !Number.isFinite(ey)) continue;
+
+    let dx = ex - this.x, dy = ey - this.y, d2 = dx*dx + dy*dy;
+
+    if (d2 > r2) {
+      const looksTile = 
+      ex >= 0 && ey >= 0 &&
+      ex < GRID_COLS && ey < GRID_ROWS &&
+      Math.abs(ex - Math.round(ex)) < 1e-3 &&
+      Math.abs(ey - Math.round(ey)) < 1e-3;
+    if (looksTile) {
+      const px = ex * TILE_SIZE + TILE_SIZE / 2;
+      const py = ey * TILE_SIZE + TILE_SIZE / 2;
+      dx = px - this.x; dy = py - this.y; d2 = dx*dx + dy*dy;
+    }
+  }
+  if (d2 <= r2 && d2 < bestD2) { best = e; bestD2 = d2; }
+  }
+  return best;
+}
 
   // Minimal, self-contained shooting
   update(dt, enemies, projectiles /* ignore grid/pool for stability */) {
