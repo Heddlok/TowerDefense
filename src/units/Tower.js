@@ -2,7 +2,7 @@
 import { TILE_SIZE } from '../world/map.js';
 
 // Global range tweak: reduce effective range ~10%
-const RANGE_TWEAK = 0.90;
+const RANGE_TWEAK = 0.70;
 
 export class Tower {
   // --- Pricing knobs ---
