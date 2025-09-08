@@ -161,28 +161,39 @@ export class Tower {
     return (dx * dx + dy * dy) <= this.range2;
   }
 
-  _acquireTarget(enemies, spatialGrid) {
-    // Prefer grid candidates if available, but always re-check true range
-    let candidates = enemies;
-    if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
-      candidates = spatialGrid.queryCircle(this.x, this.y, this.range) || enemies;
+  // In src/units/Tower.js
+_acquireTarget(enemies, spatialGrid) {
+  // Start with full list
+  let candidates = enemies;
+
+  // Use grid only if it actually yields something non-empty
+  if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
+    const list = spatialGrid.queryCircle(this.x, this.y, this.range) || [];
+    if (Array.isArray(list) && list.length > 0) {
+      candidates = list;
+    } else {
+      candidates = enemies; // ⬅️ critical fallback
     }
-
-    let best = null;
-    let bestD2 = Infinity;
-
-    for (let i = 0; i < candidates.length; i++) {
-      const e = candidates[i];
-      if (!e || e.isDead || e.reachedEnd) continue;
-
-      const p = this._enemyCenterPx(e);
-      if (!p) continue;
-      const dx = p.x - this.x, dy = p.y - this.y;
-      const d2 = dx * dx + dy * dy;
-      if (d2 <= this.range2 && d2 < bestD2) { best = e; bestD2 = d2; }
-    }
-    return best;
   }
+
+  // Pick nearest valid target within true range
+  let best = null;
+  let bestD2 = Infinity;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const e = candidates[i];
+    if (!e || e.isDead || e.reachedEnd) continue;
+    const dx = e.x - this.x;
+    const dy = e.y - this.y;
+    const d2 = dx*dx + dy*dy;
+    if (d2 <= this.range2 && d2 < bestD2) {
+      best = e;
+      bestD2 = d2;
+    }
+  }
+  return best;
+}
+
 
   // ---------- Fire ----------
   update(dt, enemies, projectiles, spatialGrid, projectilePool) {
