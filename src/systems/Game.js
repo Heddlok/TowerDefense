@@ -224,7 +224,7 @@ export class Game {
     
     // Increase cost by 33% every 2nd tower of same type
     const priceIncrements = Math.floor(sameTypeTowers / 2);
-    const multiplier = Math.pow(1.33, priceIncrements);
+    const multiplier = Math.pow(1.42, priceIncrements);
     
     return Math.round(baseCost * multiplier);
   }
