@@ -13,7 +13,7 @@ export class Enemy {
     this.hp = this.maxHp;
     this.reward = stats.reward;
 
-    this.progress = 0; // along path segments
+    this.progress = 0; // (unused) along path segments
     this.isDead = false;
     this.reachedEnd = false;
     this.x = 0;
@@ -83,27 +83,9 @@ export class Enemy {
 
   getEnemyStats(type) {
     const stats = {
-      basic: {
-        speed: 70,
-        radius: 12,
-        color: '#e5534b',
-        maxHp: 30,
-        reward: 10
-      },
-      fast: {
-        speed: 120,
-        radius: 8,
-        color: '#f85149',
-        maxHp: 15,
-        reward: 15
-      },
-      tank: {
-        speed: 40,
-        radius: 16,
-        color: '#8b5cf6',
-        maxHp: 80,
-        reward: 25
-      }
+      basic: { speed: 70,  radius: 12, color: '#e5534b', maxHp: 30, reward: 10 },
+      fast:  { speed: 120, radius: 8,  color: '#f85149', maxHp: 15, reward: 15 },
+      tank:  { speed: 40,  radius: 16, color: '#8b5cf6', maxHp: 80, reward: 25 }
     };
     return stats[type] || stats.basic;
   }
@@ -167,10 +149,20 @@ export class Enemy {
       }
     }
 
-    // Advance along segments
+    // Advance along segments (skip any zero-length segments safely)
     let remaining = this.speed * dt;
     while (remaining > 0 && this._sIndex < this._segments.length) {
       const s = this._segments[this._sIndex];
+
+      // Handle degenerate segments to avoid NaN
+      if (s.len <= 1e-9) {
+        this.x = s.bx;
+        this.y = s.by;
+        this._sIndex++;
+        this._sProgress = 0;
+        continue;
+      }
+
       const left = s.len - this._sProgress;
       const step = Math.min(remaining, left);
       const t = (this._sProgress + step) / s.len;
@@ -178,6 +170,7 @@ export class Enemy {
       this.y = s.ay + s.dy * t;
       this._sProgress += step;
       remaining -= step;
+
       if (this._sProgress >= s.len - 0.0001) {
         this._sIndex++;
         this._sProgress = 0;
@@ -187,6 +180,12 @@ export class Enemy {
     if (this._sIndex >= this._segments.length) {
       this.reachedEnd = true;
     }
+  }
+
+  // Provide bounds so SpatialGrid (and any broad-phase) can bucket this enemy
+  getBounds() {
+    const r = this.radius;
+    return { x: this.x - r, y: this.y - r, w: r * 2, h: r * 2 };
   }
 
   render(g) {

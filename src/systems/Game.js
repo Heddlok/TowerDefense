@@ -26,6 +26,7 @@ export class Game {
     this.enemies = [];
     this.towers = [];
     this.projectiles = [];
+    this.hoverTile = null;
 
     this.selectedTowerType = null;
     this.sellMode = false;
@@ -79,13 +80,7 @@ export class Game {
       }
     }
 
-    // Update spatial grid
-    this.spatialGrid.clear();
-    for (const enemy of this.enemies) {
-      this.spatialGrid.insert(enemy);
-    }
-
-    // update enemies with object pooling
+    // --- Update enemies first (positions/state) ---
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const enemy = this.enemies[i];
       enemy.update(1 / 60, this.path);
@@ -103,6 +98,12 @@ export class Game {
         this.enemyPool.release(enemy);
         this.enemies.splice(i, 1);
       }
+    }
+
+    // --- Rebuild spatial grid with current positions (no 1-frame lag) ---
+    this.spatialGrid.clear();
+    for (const enemy of this.enemies) {
+      this.spatialGrid.insert(enemy);
     }
 
     // towers acquire targets and shoot with spatial optimization
@@ -352,7 +353,7 @@ export class Game {
   toggleSound() {
     this.soundManager.toggle();
     const btn = document.getElementById('soundToggleBtn');
-    btn.textContent = this.soundManager.enabled ? '🔊 Sound' : '🔇 Sound';
+    if (btn) btn.textContent = this.soundManager.enabled ? '🔊 Sound' : '🔇 Sound';
   }
 
   hideUpgradePanel() {
@@ -417,19 +418,23 @@ export class Game {
   onMouseMove(e) {
     const { tx, ty, mx, my } = this.screenToTile(e);
     const hoverInfo = document.getElementById('hoverInfo');
-    if (this.selectedTowerType) {
-      hoverInfo.style.display = 'block';
-      hoverInfo.style.left = `${mx + 12}px`;
-      hoverInfo.style.top = `${my + 12}px`;
-      hoverInfo.textContent = 'Place tower';
-    } else if (this.sellMode) {
-      hoverInfo.style.display = 'block';
-      hoverInfo.style.left = `${mx + 12}px`;
-      hoverInfo.style.top = `${my + 12}px`;
-      hoverInfo.textContent = 'Sell tower';
-    } else {
-      hoverInfo.style.display = 'none';
+
+    if (hoverInfo) {
+      if (this.selectedTowerType) {
+        hoverInfo.style.display = 'block';
+        hoverInfo.style.left = `${mx + 12}px`;
+        hoverInfo.style.top = `${my + 12}px`;
+        hoverInfo.textContent = 'Place tower';
+      } else if (this.sellMode) {
+        hoverInfo.style.display = 'block';
+        hoverInfo.style.left = `${mx + 12}px`;
+        hoverInfo.style.top = `${my + 12}px`;
+        hoverInfo.textContent = 'Sell tower';
+      } else {
+        hoverInfo.style.display = 'none';
+      }
     }
+
     this.hoverTile = { x: tx, y: ty };
   }
 
