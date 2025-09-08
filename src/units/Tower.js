@@ -19,8 +19,10 @@ const RANGE_PX = {
 };
 
 export class Tower {
+  // --- Pricing knobs ---
   static baseCosts = { basic: 50, rapid: 80, heavy: 120 };
   static priceMul  = { basic: 1.15, rapid: 1.17, heavy: 1.20 };
+
   static towerCounts = { basic: 0, rapid: 0, heavy: 0 };
   static resetCounts() { this.towerCounts = { basic: 0, rapid: 0, heavy: 0 }; }
 
@@ -81,8 +83,10 @@ export class Tower {
     this._cooldown = 0;
   }
 
+  // Sell value based on price actually paid
   getSellValue() { return Math.floor(this.purchasePrice * 0.75); }
 
+  // Upgrade costs
   getUpgradeCost(kind) {
     const base = 30;
     const lvl = kind === 'damage' ? this.damageLevel
@@ -104,28 +108,53 @@ export class Tower {
     return false;
   }
 
-  // --- Coordinate normalization ---
-  // If an enemy looks like it's in tile space (small integers inside grid),
-  // convert to pixel center; otherwise assume pixels.
-  _enemyPosPx(enemy) {
-    let ex = enemy?.x, ey = enemy?.y;
-    if (!Number.isFinite(ex) || !Number.isFinite(ey)) return null;
+  // ---------- Robust enemy center in PIXELS ----------
+  // Accepts many shapes:
+  //  - tile center:   enemy.x/y are integers within grid (normalize to pixels)
+  //  - pixel center:  enemy.x/y already pixels
+  //  - pixel top-left + size: enemy.x/y + enemy.w/h  -> center
+  //  - explicit fields: enemy.px/py, enemy.cx/cy, enemy.centerX/centerY
+  _enemyCenterPx(e) {
+    if (!e) return null;
 
-    const nearInt = (v) => Math.abs(v - Math.round(v)) < 1e-3;
-    const looksTileSpace =
-      ex >= 0 && ey >= 0 &&
-      ex < GRID_COLS && ey < GRID_ROWS &&
-      nearInt(ex) && nearInt(ey);
+    // 1) explicit center/px fields
+    if (Number.isFinite(e.px) && Number.isFinite(e.py)) return { x: e.px, y: e.py };
+    if (Number.isFinite(e.cx) && Number.isFinite(e.cy)) return { x: e.cx, y: e.cy };
+    if (Number.isFinite(e.centerX) && Number.isFinite(e.centerY)) return { x: e.centerX, y: e.centerY };
 
-    if (looksTileSpace) {
-      ex = ex * TILE_SIZE + TILE_SIZE / 2;
-      ey = ey * TILE_SIZE + TILE_SIZE / 2;
+    // 2) generic x/y
+    if (Number.isFinite(e.x) && Number.isFinite(e.y)) {
+      const x = e.x, y = e.y;
+
+      // tiles?
+      const nearInt = (v) => Math.abs(v - Math.round(v)) < 1e-3;
+      const looksTileSpace = x >= 0 && y >= 0 && x < GRID_COLS && y < GRID_ROWS && nearInt(x) && nearInt(y);
+      if (looksTileSpace) {
+        return { x: x * TILE_SIZE + TILE_SIZE/2, y: y * TILE_SIZE + TILE_SIZE/2 };
+      }
+
+      // pixel top-left + size?
+      if (Number.isFinite(e.w) && Number.isFinite(e.h)) {
+        return { x: x + e.w / 2, y: y + e.h / 2 };
+      }
+
+      // Assume pixel center
+      return { x, y };
     }
-    return { x: ex, y: ey };
+
+    // 3) vector-ish shapes
+    if (e.pos && Number.isFinite(e.pos.x) && Number.isFinite(e.pos.y)) {
+      return { x: e.pos.x, y: e.pos.y };
+    }
+    if (e.position && Number.isFinite(e.position.x) && Number.isFinite(e.position.y)) {
+      return { x: e.position.x, y: e.position.y };
+    }
+
+    return null;
   }
 
   _inRange(enemy) {
-    const p = this._enemyPosPx(enemy);
+    const p = this._enemyCenterPx(enemy);
     if (!p) return false;
     const dx = p.x - this.x;
     const dy = p.y - this.y;
@@ -133,8 +162,8 @@ export class Tower {
   }
 
   _acquireTarget(enemies, spatialGrid) {
+    // Prefer grid candidates if available, but always re-check true range
     let candidates = enemies;
-
     if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
       candidates = spatialGrid.queryCircle(this.x, this.y, this.range) || enemies;
     }
@@ -146,20 +175,16 @@ export class Tower {
       const e = candidates[i];
       if (!e || e.isDead || e.reachedEnd) continue;
 
-      const p = this._enemyPosPx(e);
+      const p = this._enemyCenterPx(e);
       if (!p) continue;
       const dx = p.x - this.x, dy = p.y - this.y;
       const d2 = dx * dx + dy * dy;
-
-      if (d2 <= this.range2 && d2 < bestD2) {
-        best = e;
-        bestD2 = d2;
-      }
+      if (d2 <= this.range2 && d2 < bestD2) { best = e; bestD2 = d2; }
     }
     return best;
   }
 
-  // Minimal shooting API expected by Game.js
+  // ---------- Fire ----------
   update(dt, enemies, projectiles, spatialGrid, projectilePool) {
     this._cooldown -= dt;
     if (this._cooldown > 0) return false;
@@ -167,18 +192,24 @@ export class Tower {
     const target = this._acquireTarget(enemies, spatialGrid);
     if (!target) return false;
 
+    // Spawn projectile (adapt to your init signature)
+    const speed = 250;
     const p = projectilePool ? projectilePool.get() : null;
+
     if (p && typeof p.init === 'function') {
-      // OptimizedProjectile likely reads target.x/y each frame, so we pass the enemy ref.
-      p.init(this.x, this.y, target, this.damage);
+      const arity = p.init.length;
+      if (arity >= 5) p.init(this.x, this.y, target, this.damage, speed);
+      else if (arity === 4) p.init(this.x, this.y, target, this.damage);
+      else p.init({ x: this.x, y: this.y, target, damage: this.damage, speed });
       projectiles.push(p);
     } else {
-      // Fallback (only used if you don't have the pool)
-      // NOTE: Your p.update should normalize target coords similarly if needed.
+      // Fallback (only used if you don't have a pool)
       projectiles.push({
         x: this.x, y: this.y, target,
-        damage: this.damage, speed: 250,
+        damage: this.damage, speed,
         done: false, hitTarget: false,
+        render(g){ /* no-op to avoid crashes if your renderer calls p.render */ },
+        update(){ this.done = true; this.hitTarget = true; },
       });
     }
 
@@ -199,7 +230,7 @@ export class Tower {
     g.strokeRect(Math.floor(left) + 0.5, Math.floor(top) + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     g.restore();
 
-    // // Debug: visualize range
+    // // Debug range (uncomment while testing):
     // g.save();
     // g.strokeStyle = this.color;
     // g.globalAlpha = 0.25;
