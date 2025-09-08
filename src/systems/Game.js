@@ -37,6 +37,7 @@ export class Game {
     // Performance optimizations
     this.perfMonitor = new PerformanceMonitor();
     this.spatialGrid = new SpatialGrid(canvas.width, canvas.height, TILE_SIZE);
+    this.currentRenderScale = 1; // <-- track current scale for accurate input mapping
 
     // Object pools
     this.enemyPool = new ObjectPool(
@@ -70,6 +71,12 @@ export class Game {
     if (this.gameOver) { this.updateUI(); return; }
     this.time = ts;
     this.perfMonitor.update();
+
+    // Keep a fresh copy of renderScale each frame for input mapping
+    const statsForInput = this.perfMonitor.getStats();
+    this.currentRenderScale = statsForInput && Number.isFinite(statsForInput.renderScale)
+      ? Math.max(0.001, statsForInput.renderScale) : 1;
+
     this.updateUI();
 
     // planning timer
@@ -154,6 +161,10 @@ export class Game {
   render() {
     const g = this.ctx;
     const stats = this.perfMonitor.getStats();
+
+    // Also mirror renderScale here (in case UI pulls it first time during render)
+    this.currentRenderScale = stats && Number.isFinite(stats.renderScale)
+      ? Math.max(0.001, stats.renderScale) : 1;
 
     // Adaptive quality scaling
     if (stats.renderScale < 1.0) {
@@ -281,188 +292,55 @@ export class Game {
     if (hc) hc.textContent = String(Tower.getNextTowerCost('heavy'));
   }
 
-  startWave() {
-    if (this.gameOver) return;
-
-    // Enter combat + advance wave counter
-    this.phase = 'combat';
-    this.wave += 1;
-    this.soundManager.playWaveStart();
-
-    // Difficulty knobs for this wave
-    const scaling = getWaveScaling(this.wave);   // { hpMul, rewardMul, speedMul }
-    const plan    = getWavePlan(this.wave);      // { count, interval, burstBonus? }
-
-    // ---- ENEMY COMPOSITION RULES ----
-    // Waves 1–3: ONLY basic enemies (no exceptions).
-    // After that: gradually add fast first, then tanks a bit later.
-    let weights;
-    if (this.wave <= 3) {
-      weights = { basic: 1, fast: 0, tank: 0 };
-    } else {
-      const t = Math.max(0, this.wave - 3);                   // waves since "variety" unlocked
-      let fastW = Math.min(0.40, 0.05 + 0.02 * t);            // ~5% at wave 4, +2%/wave → cap 40%
-      let tankW = Math.min(0.35, 0.015 * Math.max(0, t - 2)); // starts ~wave 6, +1.5%/wave → cap 35%
-      let basicW = Math.max(0.15, 1 - fastW - tankW);         // always keep >=15% basics
-
-      const sum = basicW + fastW + tankW;                     // normalize just in case
-      weights = { basic: basicW / sum, fast: fastW / sum, tank: tankW / sum };
-    }
-
-    const totalToSpawn = (plan.count || 0) + (plan.burstBonus || 0);
-    let spawned = 0;
-    this.spawning = true;
-
-    const pickType = () => {
-      if (this.wave <= 3) return 'basic'; // HARD GUARD
-      const a = Math.max(0, weights.basic || 0);
-      const b = Math.max(0, weights.fast  || 0);
-      const c = Math.max(0, weights.tank  || 0);
-      const sum = a + b + c || 1;
-      const r = Math.random() * sum;
-      return (r < a) ? 'basic' : (r < a + b) ? 'fast' : 'tank';
-    };
-
-    const spawnOne = () => {
-      if (this.gameOver) { this.spawning = false; return; }
-      if (spawned >= totalToSpawn) { this.spawning = false; return; }
-
-      // Decide type and spawn
-      let type = pickType();
-      if (this.wave <= 3) type = 'basic'; // redundant guard
-
-      const enemy = this.enemyPool.get();
-      enemy.init(type, scaling);           // Enemy.js accepts scaling
-      this.enemies.push(enemy);
-      spawned++;
-
-      // Spawn pacing (seconds) with light jitter and a floor
-      const jitter = (Math.random() * 0.12) - 0.06; // ±0.06s
-      const intervalSec = Math.max(0.10, (plan.interval || 1.0) + jitter);
-      setTimeout(spawnOne, intervalSec * 1000);
-    };
-
-    spawnOne();
-  }
-
-  selectTower(type) {
-    this.selectedTowerType = type;
-    this.sellMode = false;
-    this.upgradeMode = false;
-    this.selectedTower = null;
-    this.hideUpgradePanel();
-  }
-
-  toggleSellMode() {
-    this.sellMode = !this.sellMode;
-    if (this.sellMode) {
-      this.selectedTowerType = null;
-      this.upgradeMode = false;
-      this.selectedTower = null;
-      this.hideUpgradePanel();
-    }
-  }
-
-  toggleUpgradeMode() {
-    this.upgradeMode = !this.upgradeMode;
-    if (this.upgradeMode) {
-      this.selectedTowerType = null;
-      this.sellMode = false;
-    } else {
-      this.selectedTower = null;
-      this.hideUpgradePanel();
-    }
-  }
-
-  toggleSound() {
-    this.soundManager.toggle();
-    const btn = document.getElementById('soundToggleBtn');
-    if (btn) btn.textContent = this.soundManager.enabled ? '🔊 Sound' : '🔇 Sound';
-  }
-
-  hideUpgradePanel() {
-    const panel = document.getElementById('upgradePanel');
-    if (panel) panel.style.display = 'none';
-  }
-
-  showUpgradePanel(tower) {
-    const panel = document.getElementById('upgradePanel');
-    if (!panel) return;
-
-    // Update current stats
-    document.getElementById('currentDamage').textContent = tower.damage;
-    document.getElementById('currentRange').textContent = tower.range;
-    document.getElementById('currentFireRate').textContent = tower.fireRate.toFixed(1);
-
-    // Update upgrade costs
-    document.getElementById('damageCost').textContent = tower.getUpgradeCost('damage');
-    document.getElementById('rangeCost').textContent = tower.getUpgradeCost('range');
-    document.getElementById('fireRateCost').textContent = tower.getUpgradeCost('fireRate');
-
-    // Update sell value
-    document.getElementById('sellValue').textContent = tower.getSellValue();
-
-    // Enable/disable buttons based on upgrade levels and money
-    const damageBtn = document.getElementById('upgradeDamageBtn');
-    const rangeBtn = document.getElementById('upgradeRangeBtn');
-    const fireRateBtn = document.getElementById('upgradeFireRateBtn');
-
-    damageBtn.disabled = tower.damageLevel >= tower.maxUpgradeLevel || this.money < tower.getUpgradeCost('damage');
-    rangeBtn.disabled = tower.rangeLevel >= tower.maxUpgradeLevel || this.money < tower.getUpgradeCost('range');
-    fireRateBtn.disabled = tower.fireRateLevel >= tower.maxUpgradeLevel || this.money < tower.getUpgradeCost('fireRate');
-
-    panel.style.display = 'block';
-  }
-
-  upgradeTower(upgradeType) {
-    if (!this.selectedTower) return;
-
-    const cost = this.selectedTower.getUpgradeCost(upgradeType);
-    if (!Number.isFinite(cost) || cost === Infinity) return;
-    if (this.money < cost) return;
-
-    this.money -= cost;
-    const ok = this.selectedTower.upgrade(upgradeType);
-    if (ok) {
-      this.soundManager.playTowerPlace(); // Reuse place sound for upgrade
-      // Update the panel with new stats/costs
-      this.showUpgradePanel(this.selectedTower);
-    }
-  }
-
+  // Map mouse to *canvas pixel space*, then undo renderScale, then to tile coords.
   screenToTile(e) {
     const rect = this.canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const tx = Math.floor(mx / TILE_SIZE);
-    const ty = Math.floor(my / TILE_SIZE);
-    return { tx, ty, mx, my };
+
+    // Map CSS pixels -> canvas pixels (handles DPR and CSS size differences)
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    let mxCanvas = (e.clientX - rect.left) * scaleX;
+    let myCanvas = (e.clientY - rect.top) * scaleY;
+
+    // Undo our rendering scale so hit tests match what we drew
+    const rs = this.currentRenderScale || 1;
+    if (rs !== 1) {
+      mxCanvas /= rs;
+      myCanvas /= rs;
+    }
+
+    const tx = Math.floor(mxCanvas / TILE_SIZE);
+    const ty = Math.floor(myCanvas / TILE_SIZE);
+
+    // Also return CSS-space coords for positioning DOM tooltips
+    const cssX = (e.clientX - rect.left);
+    const cssY = (e.clientY - rect.top);
+
+    return { tx, ty, mx: mxCanvas, my: myCanvas, cssX, cssY };
   }
 
   onMouseMove(e) {
-    const { tx, ty, mx, my } = this.screenToTile(e);
+    const { tx, ty, cssX, cssY } = this.screenToTile(e);
     const hoverInfo = document.getElementById('hoverInfo');
 
     if (hoverInfo) {
-      // make absolutely sure the tooltip never blocks pointer events
       hoverInfo.style.pointerEvents = 'none';
       hoverInfo.style.userSelect = 'none';
 
       if (this.selectedTowerType) {
         hoverInfo.style.display = 'block';
-        hoverInfo.style.left = `${mx + 12}px`;
-        hoverInfo.style.top = `${my + 12}px`;
+        hoverInfo.style.left = `${cssX + 12}px`;
+        hoverInfo.style.top  = `${cssY + 12}px`;
         hoverInfo.textContent = 'Place tower';
       } else if (this.sellMode) {
         hoverInfo.style.display = 'block';
-        hoverInfo.style.left = `${mx + 12}px`;
-        hoverInfo.style.top = `${my + 12}px`;
+        hoverInfo.style.left = `${cssX + 12}px`;
+        hoverInfo.style.top  = `${cssY + 12}px`;
         hoverInfo.textContent = 'Sell tower';
       } else {
         hoverInfo.style.display = 'none';
       }
     }
-
     this.hoverTile = { x: tx, y: ty };
   }
 
@@ -475,6 +353,8 @@ export class Game {
       if (idx >= 0) {
         const [sold] = this.towers.splice(idx, 1);
         this.money += sold.getSellValue();
+        // If you want prices to drop after selling, also call:
+        // Tower.deregisterOnSell(sold.type);
       }
       return;
     }
@@ -492,8 +372,9 @@ export class Game {
     }
 
     if (!this.selectedTowerType) return;
-    if (isOnPath(tx, ty, this.path)) return; // cannot build on path
-    if (this.towers.some(t => t.tx === tx && t.ty === ty)) return; // occupied
+    if (tx < 0 || ty < 0 || tx >= GRID_COLS || ty >= GRID_ROWS) return; // guard
+    if (isOnPath(tx, ty, this.path)) return;                              // cannot build on path
+    if (this.towers.some(t => t.tx === tx && t.ty === ty)) return;        // occupied
 
     // Quote current price and buy safely
     const type = this.selectedTowerType;
