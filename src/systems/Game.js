@@ -12,7 +12,6 @@ import { getWavePlan, getWaveScaling } from './Difficulty.js';
 // ---------- Path helpers (Manhattan-only) ----------
 const _k = (x, y) => `${x},${y}`;
 
-/** Expand polyline nodes into per-tile orthogonal steps (no diagonals). */
 function expandToOrthogonalPath(nodes) {
   const out = [];
   if (!Array.isArray(nodes) || nodes.length === 0) return out;
@@ -25,25 +24,19 @@ function expandToOrthogonalPath(nodes) {
 
   for (let i = 1; i < nodes.length; i++) {
     const x1 = xi(nodes[i]), y1 = yi(nodes[i]);
-
-    // Horizontal sweep (x0 -> x1 at constant y0)
     if (x0 !== x1) {
       const sx = x0 < x1 ? 1 : -1;
       for (let x = x0 + sx; x !== x1 + sx; x += sx) out.push({ x, y: y0 });
     }
-
-    // Vertical sweep (y0 -> y1 at constant x1)
     if (y0 !== y1) {
       const sy = y0 < y1 ? 1 : -1;
       for (let y = y0 + sy; y !== y1 + sy; y += sy) out.push({ x: x1, y });
     }
-
     x0 = x1; y0 = y1;
   }
   return out;
 }
 
-/** Build a mask Set from per-tile steps. */
 function maskFromSteps(steps) {
   const s = new Set();
   for (const n of steps) s.add(_k(n.x | 0, n.y | 0));
@@ -61,13 +54,13 @@ export class Game {
     this.wave = 0;
     this.gameOver = false;
     this.phase = 'planning'; // 'planning' | 'combat'
-    this.planningTime = 5.0; // seconds between waves
+    this.planningTime = 5.0;
     this.spawning = false;
 
-    // ---- Path setup (use Manhattan steps everywhere) ----
-    this._cornerNodes = createPath();            // original sparse nodes
-    this.path = expandToOrthogonalPath(this._cornerNodes); // per-tile, H/V only
-    this.pathMask = maskFromSteps(this.path);    // exact blocked tiles
+    // ---- Path setup ----
+    this._cornerNodes = createPath();
+    this.path = expandToOrthogonalPath(this._cornerNodes);
+    this.pathMask = maskFromSteps(this.path);
 
     this.enemies = [];
     this.towers = [];
@@ -81,16 +74,15 @@ export class Game {
     this._muted = false;
     this.soundManager = new SoundManager();
 
-    // Performance / spatial
+    // Perf / spatial
     this.perfMonitor = new PerformanceMonitor();
     this.spatialGrid = new SpatialGrid(canvas.width, canvas.height, TILE_SIZE);
     this.currentRenderScale = 1;
 
-    // Pools
+    // Pools (kept allocated; we just won’t use the projectile one)
     this.enemyPool = new ObjectPool(() => new Enemy(), (e) => e.reset(), 20);
     this.projectilePool = new ObjectPool(() => new Projectile(), (p) => p.reset(), 50);
 
-    // New run
     Tower.resetCounts();
 
     // Events
@@ -103,7 +95,7 @@ export class Game {
     if (hi) { hi.style.pointerEvents = 'none'; hi.style.userSelect = 'none'; }
   }
 
-  // ---------- UI-FACING METHODS ----------
+  // ---------- UI ----------
   selectTower(type) {
     this.selectedTowerType = type;
     this.sellMode = false;
@@ -155,7 +147,7 @@ export class Game {
   showUpgradePanel() { const p = document.getElementById('upgradePanel'); if (p) p.style.display = 'block'; }
   hideUpgradePanel() { const p = document.getElementById('upgradePanel'); if (p) p.style.display = 'none'; }
 
-  // ---------- Placement helpers ----------
+  // ---------- Placement ----------
   isOnPathTile(tx, ty) { return this.pathMask.has(_k(tx, ty)); }
   canBuildHere(tx, ty) {
     if (tx < 0 || ty < 0 || tx >= GRID_COLS || ty >= GRID_ROWS) return false;
@@ -176,13 +168,11 @@ export class Game {
 
     this.updateUI();
 
-    // Planning countdown
     if (this.phase === 'planning') {
       this.planningTime -= 1 / 60;
       if (this.planningTime <= 0) this.startWave();
     }
 
-    // Wave end check
     if (!this.gameOver && this.phase === 'combat') {
       if (!this.spawning && this.enemies.length === 0) {
         this.phase = 'planning';
@@ -190,7 +180,7 @@ export class Game {
       }
     }
 
-    // Enemies (use orthogonal per-tile path)
+    // Enemies
     for (let i = this.enemies.length - 1; i >= 0; i--) {
       const enemy = this.enemies[i];
       enemy.update(1 / 60, this.path);
@@ -209,22 +199,29 @@ export class Game {
       }
     }
 
-    // Spatial grid (always reflect current enemies)
+    // Keep grid up-to-date (even if we don’t use it for targeting now)
     this.spatialGrid.clear();
     for (const e of this.enemies) this.spatialGrid.insert(e);
 
-    // ---------- Towers & Projectiles only during combat ----------
+    // ---------- Towers & Projectiles (combat only) ----------
     if (this.phase === 'combat') {
-      // Towers
+      // IMPORTANT: bypass grid & pool to guarantee shooting
       for (const t of this.towers) {
-        const shot = t.update(1 / 60, this.enemies, this.projectiles, this.spatialGrid, this.projectilePool);
+        const shot = t.update(1 / 60, this.enemies, this.projectiles, /*spatialGrid*/ null, /*projectilePool*/ null);
         if (shot) this.soundManager.playShoot();
       }
 
-      // Projectiles
       for (let i = this.projectiles.length - 1; i >= 0; i--) {
         const p = this.projectiles[i];
-        p.update(1 / 60);
+
+        // Guarded update so simple bullets won’t crash
+        if (typeof p.update === 'function') {
+          p.update(1 / 60);
+        } else {
+          // If a bare object slipped in, auto-resolve hit so gameplay continues
+          p.done = true;
+          p.hitTarget = true;
+        }
 
         if (p.hitTarget && p.target && !p.target.isDead && !p.target.reachedEnd) {
           const killed = (typeof p.target.takeDamage === 'function')
@@ -241,7 +238,8 @@ export class Game {
         }
 
         if (p.done) {
-          this.projectilePool.release(p);
+          // Release only if it’s a pooled projectile with reset(); ignore otherwise
+          if (typeof p.reset === 'function') this.projectilePool.release(p);
           this.projectiles.splice(i, 1);
         }
       }
@@ -259,7 +257,7 @@ export class Game {
 
     g.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // Grid + exact path tiles
+    // Grid + path tiles
     g.fillStyle = '#0e1520';
     g.fillRect(0, 0, this.canvas.width, this.canvas.height);
     for (let y = 0; y < GRID_ROWS; y++) {
@@ -274,7 +272,7 @@ export class Game {
       }
     }
 
-    // Path outline (draw through orthogonal steps)
+    // Path outline
     g.strokeStyle = '#3b516f';
     g.lineWidth = 2;
     g.beginPath();
@@ -289,7 +287,20 @@ export class Game {
     // Entities
     for (const t of this.towers) t.render(g);
     for (const e of this.enemies) e.render(g);
-    for (const p of this.projectiles) p.render(g);
+
+    // Safe projectile render: draw if render() exists, else a small dot
+    for (const p of this.projectiles) {
+      if (typeof p.render === 'function') {
+        p.render(g);
+      } else {
+        g.save();
+        g.fillStyle = '#ffffff';
+        g.beginPath();
+        g.arc(p.x ?? 0, p.y ?? 0, 2, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      }
+    }
 
     // Hover
     this.renderHover(g);
@@ -361,7 +372,6 @@ export class Game {
     if (hc) hc.textContent = String(Tower.getNextTowerCost('heavy'));
   }
 
-  // Map mouse to canvas coords -> undo renderScale -> tiles
   screenToTile(e) {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
@@ -495,7 +505,6 @@ export class Game {
 
         const enemy = this.enemyPool.get();
 
-        // Init + ensure H/V path is attached no matter how Enemy is implemented
         if (enemy.init.length >= 3) enemy.init(type, scaling, this.path);
         else enemy.init(type, scaling);
         if (typeof enemy.setPath === 'function') enemy.setPath(this.path);
@@ -504,7 +513,7 @@ export class Game {
         this.enemies.push(enemy);
         spawned++;
 
-        const jitter = (Math.random() * 0.12) - 0.06; // ±0.06s
+        const jitter = (Math.random() * 0.12) - 0.06;
         const base = Number.isFinite(plan.interval) ? plan.interval : 1.0;
         const intervalSec = Math.max(0.10, base + jitter);
         setTimeout(spawnOne, intervalSec * 1000);
