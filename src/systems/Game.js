@@ -50,6 +50,9 @@ export class Game {
       50
     );
 
+    // Reset tower counts when starting a new game
+    Tower.resetCounts();
+
     canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
     canvas.addEventListener('click', (e) => this.onClick(e));
   }
@@ -208,27 +211,6 @@ export class Game {
     }
   }
 
-  // Helper method to get dynamic cost for a tower type
-  getTowerCost(towerType) {
-    // Count towers of the same type already built
-    const sameTypeTowers = this.towers.filter(t => t.type === towerType).length;
-    
-    // Base costs
-    const baseCosts = {
-      basic: 50,
-      rapid: 80,
-      heavy: 120
-    };
-    
-    const baseCost = baseCosts[towerType] || 50;
-    
-    // Increase cost by 33% every 2nd tower of same type
-    const priceIncrements = Math.floor(sameTypeTowers / 2);
-    const multiplier = Math.pow(1.42, priceIncrements);
-    
-    return Math.round(baseCost * multiplier);
-  }
-
   updateUI() {
     document.getElementById('money').textContent = String(this.money);
     document.getElementById('lives').textContent = String(this.lives);
@@ -243,26 +225,29 @@ export class Game {
     const stats = this.perfMonitor.getStats();
     document.getElementById('fps').textContent = String(stats.fps);
 
-    // Update tower button costs dynamically
+    // Update tower button costs using Tower class static method
     const basicBtn = document.getElementById('basicTowerBtn');
     const rapidBtn = document.getElementById('rapidTowerBtn');
     const heavyBtn = document.getElementById('heavyTowerBtn');
     
     if (basicBtn) {
-      const basicCost = this.getTowerCost('basic');
-      basicBtn.textContent = `Basic ($${basicCost})`;
+      const basicCost = Tower.getCurrentCost('basic');
+      const basicCount = Tower.towerCounts.basic;
+      basicBtn.textContent = `Basic (${basicCost}) [${basicCount} built]`;
       basicBtn.disabled = this.gameOver || this.money < basicCost;
     }
     
     if (rapidBtn) {
-      const rapidCost = this.getTowerCost('rapid');
-      rapidBtn.textContent = `Rapid ($${rapidCost})`;
+      const rapidCost = Tower.getCurrentCost('rapid');
+      const rapidCount = Tower.towerCounts.rapid;
+      rapidBtn.textContent = `Rapid (${rapidCost}) [${rapidCount} built]`;
       rapidBtn.disabled = this.gameOver || this.money < rapidCost;
     }
     
     if (heavyBtn) {
-      const heavyCost = this.getTowerCost('heavy');
-      heavyBtn.textContent = `Heavy ($${heavyCost})`;
+      const heavyCost = Tower.getCurrentCost('heavy');
+      const heavyCount = Tower.towerCounts.heavy;
+      heavyBtn.textContent = `Heavy (${heavyCost}) [${heavyCount} built]`;
       heavyBtn.disabled = this.gameOver || this.money < heavyCost;
     }
 
@@ -406,15 +391,14 @@ export class Game {
   upgradeTower(upgradeType) {
     if (!this.selectedTower) return;
 
-    const cost = this.selectedTower.getUpgradeCost(upgradeType);
-    if (this.money < cost) return;
-
-    this.money -= cost;
-    this.selectedTower.upgrade(upgradeType);
-    this.soundManager.playTowerPlace(); // Reuse sound for upgrade
-
-    // Update the panel
-    this.showUpgradePanel(this.selectedTower);
+    const result = this.selectedTower.upgrade(upgradeType, { amount: this.money });
+    if (result.success) {
+      this.money = { amount: this.money }.amount; // Handle money deduction from Tower class
+      this.soundManager.playTowerPlace(); // Reuse sound for upgrade
+      
+      // Update the panel
+      this.showUpgradePanel(this.selectedTower);
+    }
   }
 
   screenToTile(e) {
@@ -474,8 +458,8 @@ export class Game {
     if (isOnPath(tx, ty, this.path)) return; // cannot build on path
     if (this.towers.some(t => t.tx === tx && t.ty === ty)) return; // occupied
 
-    // Get dynamic cost for selected tower type
-    const cost = this.getTowerCost(this.selectedTowerType);
+    // Use Tower class static method for cost calculation
+    const cost = Tower.getCurrentCost(this.selectedTowerType);
     if (this.money < cost) return;
 
     this.money -= cost;
