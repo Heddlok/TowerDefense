@@ -6,6 +6,13 @@ export class Tower {
   static baseCosts = { basic: 50, rapid: 80, heavy: 120 };
   static priceMul  = { basic: 1.15, rapid: 1.17, heavy: 1.20 };
 
+  // Visuals per type
+  static colors = {
+    basic: '#4DB6FF', // blue
+    rapid: '#66BB6A', // green
+    heavy: '#FFB74D', // orange
+  };
+
   // Counts drive price. By default this is "ever built".
   static towerCounts = { basic: 0, rapid: 0, heavy: 0 };
 
@@ -55,6 +62,9 @@ export class Tower {
     this.range    = (baseStats.range ?? 96) * RANGE_SCALE; // pixels
     this.damage   = baseStats.damage ?? 8;
     this.fireRate = baseStats.fireRate ?? 1.0;
+
+    // Visuals
+    this.color = Tower.colors[type] || '#9E9E9E';
 
     // upgrade tracking
     this.maxUpgradeLevel = 5;
@@ -130,13 +140,19 @@ export class Tower {
     const half = size / 2;
 
     g.save();
-    g.fillStyle = '#3498db';
+    g.fillStyle = this.color;
     g.fillRect(this.x - half, this.y - half, size, size);
+
+    // subtle outline for visibility on dark tiles
+    g.strokeStyle = 'rgba(0,0,0,0.35)';
+    g.lineWidth = 2;
+    g.strokeRect(this.x - half, this.y - half, size, size);
     g.restore();
 
-    // (Optional) draw range for debugging:
+    // // (Optional) draw range for debugging:
     // g.save();
-    // g.strokeStyle = 'rgba(77,182,255,0.25)';
+    // g.strokeStyle = this.color;
+    // g.globalAlpha = 0.25;
     // g.beginPath();
     // g.arc(this.x, this.y, this.range, 0, Math.PI * 2);
     // g.stroke();
