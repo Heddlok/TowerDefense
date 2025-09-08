@@ -1,3 +1,4 @@
+// systems/Game.js
 import { createPath, TILE_SIZE, GRID_COLS, GRID_ROWS, isOnPath } from '../world/map.js';
 import { Enemy } from '../units/Enemy.js';
 import { Tower } from '../units/Tower.js';
@@ -32,6 +33,7 @@ export class Game {
     this.sellMode = false;
     this.upgradeMode = false;
     this.selectedTower = null;
+    this._muted = false;
     this.soundManager = new SoundManager();
 
     // Performance optimizations
@@ -56,8 +58,10 @@ export class Game {
     Tower.resetCounts();
 
     // Events
-    canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
-    canvas.addEventListener('click', (e) => this.onClick(e));
+    this._onMouseMove = (e) => this.onMouseMove(e);
+    this._onClick = (e) => this.onClick(e);
+    canvas.addEventListener('mousemove', this._onMouseMove);
+    canvas.addEventListener('click', this._onClick);
 
     // Ensure hover tooltip never blocks clicks/taps
     const hi = document.getElementById('hoverInfo');
@@ -66,6 +70,97 @@ export class Game {
       hi.style.userSelect = 'none';
     }
   }
+
+  // -----------------------------
+  // UI-FACING METHODS (used by main.js)
+  // -----------------------------
+
+  selectTower(type) {
+    this.selectedTowerType = type;
+    // Avoid conflicting modes while placing
+    this.sellMode = false;
+    this.upgradeMode = false;
+    this.selectedTower = null;
+    this.updateUI();
+  }
+
+  toggleSellMode() {
+    this.sellMode = !this.sellMode;
+    if (this.sellMode) {
+      this.upgradeMode = false;
+      this.selectedTowerType = null; // do not place while selling
+      this.selectedTower = null;
+      this.hideUpgradePanel();
+    }
+    this.updateUI();
+  }
+
+  toggleUpgradeMode() {
+    this.upgradeMode = !this.upgradeMode;
+    if (this.upgradeMode) {
+      this.sellMode = false;
+      this.selectedTowerType = null; // upgrades target existing towers
+    } else {
+      this.selectedTower = null;
+      this.hideUpgradePanel();
+    }
+    this.updateUI();
+  }
+
+  toggleSound() {
+    this._muted = !this._muted;
+    if (typeof this.soundManager?.setMuted === 'function') {
+      this.soundManager.setMuted(this._muted);
+    } else if (this.soundManager) {
+      this.soundManager.muted = this._muted;
+    }
+    const btn = document.getElementById('soundToggleBtn');
+    if (btn) btn.textContent = this._muted ? 'Sound: Off' : 'Sound: On';
+  }
+
+  // Acts on the currently selected tower (selected via click while in upgrade mode)
+  upgradeTower(stat) {
+    const t = this.selectedTower;
+    if (!t) return;
+
+    // Prefer tower's own upgrade API if present
+    if (typeof t.upgrade === 'function') {
+      t.upgrade(stat);
+    } else if (typeof t.tryUpgrade === 'function') {
+      t.tryUpgrade(stat);
+    } else {
+      // Fallback: simple inline upgrades
+      switch (stat) {
+        case 'damage':
+          t.damage = (t.damage ?? 5) + 1;
+          break;
+        case 'range':
+          t.range = (t.range ?? (TILE_SIZE * 2)) + TILE_SIZE * 0.25;
+          break;
+        case 'fireRate':
+          // lower fireRate = faster shooting (if that's your API)
+          t.fireRate = Math.max(0.05, (t.fireRate ?? 1) * 0.9);
+          break;
+      }
+    }
+
+    this.showUpgradePanel(t); // keep panel visible/updated
+    this.updateUI();
+  }
+
+  showUpgradePanel(/* tower */) {
+    const panel = document.getElementById('upgradePanel');
+    if (panel) panel.style.display = 'block';
+  }
+
+  hideUpgradePanel() {
+    const panel = document.getElementById('upgradePanel');
+    if (panel) panel.style.display = 'none';
+  }
+
+  // -----------------------------
+  // CORE LOOP
+  // -----------------------------
 
   update(ts) {
     if (this.gameOver) { this.updateUI(); return; }
@@ -485,5 +580,11 @@ export class Game {
     g.lineWidth = 2;
     g.strokeRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
     g.restore();
+  }
+
+  // Optional: clean up listeners if you ever dispose/recreate the game
+  destroy() {
+    this.canvas.removeEventListener('mousemove', this._onMouseMove);
+    this.canvas.removeEventListener('click', this._onClick);
   }
 }
