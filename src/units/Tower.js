@@ -13,24 +13,16 @@ export class Tower {
     heavy: '#FFB74D', // orange
   };
 
-  // Counts drive price. By default this is "ever built".
+  // Counts drive price.
   static towerCounts = { basic: 0, rapid: 0, heavy: 0 };
-
-  static resetCounts() {
-    this.towerCounts = { basic: 0, rapid: 0, heavy: 0 };
-  }
-
+  static resetCounts() { this.towerCounts = { basic: 0, rapid: 0, heavy: 0 }; }
   static getNextTowerCost(type) {
     const base = this.baseCosts[type] ?? 0;
     const mul  = this.priceMul[type]  ?? 1.0;
     const n    = this.towerCounts[type] ?? 0;
     return Math.max(1, Math.round(base * Math.pow(mul, n)));
   }
-
-  static registerPurchase(type) {
-    this.towerCounts[type] = (this.towerCounts[type] ?? 0) + 1;
-  }
-
+  static registerPurchase(type) { this.towerCounts[type] = (this.towerCounts[type] ?? 0) + 1; }
   static deregisterOnSell(type) {
     const n = (this.towerCounts[type] ?? 0) - 1;
     this.towerCounts[type] = Math.max(0, n);
@@ -41,32 +33,29 @@ export class Tower {
     this.ty = ty;
     this.type = type;
 
-    // Price actually paid (shown in UI / used for sell value)
     this.purchasePrice = Number.isFinite(purchasePrice)
       ? purchasePrice
       : Tower.getNextTowerCost(type);
 
-    // Convert to world pixels once and use everywhere
+    // Pixel-space center of this tile
     this.x = tx * TILE_SIZE + TILE_SIZE / 2;
     this.y = ty * TILE_SIZE + TILE_SIZE / 2;
 
-    // Stats tuned originally around 32px tiles; scale them to current TILE_SIZE
+    // Scale range from a 32px baseline to current TILE_SIZE
     const RANGE_SCALE = TILE_SIZE / 32;
-
     const baseStats = {
-      basic: { range: 30, damage: 10, fireRate: 1.0 },
-      rapid: { range:  30, damage:  6, fireRate: 2.0 },
-      heavy: { range: 10, damage: 20, fireRate: 0.6 },
-    }[type] || { range: 30, damage: 8, fireRate: 1.0 };
+      basic: { range: 100, damage: 10, fireRate: 1.0 },
+      rapid: { range:  90, damage:  6, fireRate: 2.0 },
+      heavy: { range: 120, damage: 20, fireRate: 0.6 },
+    }[type] || { range: 90, damage: 8, fireRate: 1.0 };
 
-    this.range    = (baseStats.range ?? 96) * RANGE_SCALE; // pixels
+    this.range    = (baseStats.range ?? 96) * RANGE_SCALE;
     this.damage   = baseStats.damage ?? 8;
     this.fireRate = baseStats.fireRate ?? 1.0;
 
-    // Visuals
     this.color = Tower.colors[type] || '#9E9E9E';
 
-    // upgrade tracking
+    // Upgrades
     this.maxUpgradeLevel = 5;
     this.damageLevel = 0;
     this.rangeLevel = 0;
@@ -75,12 +64,8 @@ export class Tower {
     this._cooldown = 0;
   }
 
-  // Example sell formula
-  getSellValue() {
-    return Math.floor(this.purchasePrice * 0.75);
-  }
+  getSellValue() { return Math.floor(this.purchasePrice * 0.75); }
 
-  // Example upgrade costs
   getUpgradeCost(kind) {
     const base = 30;
     const lvl = kind === 'damage' ? this.damageLevel
@@ -102,51 +87,47 @@ export class Tower {
     return false;
   }
 
-  // Minimal shooting API expected by Game.js
   update(dt, enemies, projectiles, spatialGrid, projectilePool) {
     this._cooldown -= dt;
     if (this._cooldown > 0) return false;
 
-    // Find a target (use grid if available)
+    // Acquire target
     let target = null;
-    if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
+    if (spatialGrid?.queryCircle) {
       const candidates = spatialGrid.queryCircle(this.x, this.y, this.range);
       target = candidates.find(e => !e.isDead && !e.reachedEnd);
     } else {
       target = enemies.find(e => !e.isDead && !e.reachedEnd &&
         Math.hypot(e.x - this.x, e.y - this.y) <= this.range);
     }
-
     if (!target) return false;
 
+    // Fire
     const p = projectilePool ? projectilePool.get() : null;
-    if (p && typeof p.init === 'function') {
+    if (p?.init) {
       p.init(this.x, this.y, target, this.damage);
       projectiles.push(p);
     } else {
-      projectiles.push({
-        x: this.x, y: this.y, target,
-        damage: this.damage, speed: 250,
-        done: false, hitTarget: false
-      });
+      projectiles.push({ x: this.x, y: this.y, target, damage: this.damage, speed: 250, done: false, hitTarget: false });
     }
-
     this._cooldown = 1 / this.fireRate;
     return true;
   }
 
   render(g) {
-    const size = Math.floor(TILE_SIZE * 0.6);
-    const half = size / 2;
+    // Fill the ENTIRE tile this tower occupies
+    const left = this.x - TILE_SIZE / 2;
+    const top  = this.y - TILE_SIZE / 2;
 
     g.save();
     g.fillStyle = this.color;
-    g.fillRect(this.x - half, this.y - half, size, size);
+    g.fillRect(left, top, TILE_SIZE, TILE_SIZE);
 
-    // subtle outline for visibility on dark tiles
+    // Optional subtle border for readability
     g.strokeStyle = 'rgba(0,0,0,0.35)';
     g.lineWidth = 2;
-    g.strokeRect(this.x - half, this.y - half, size, size);
+    // 0.5 offsets reduce blurry edges on 1px strokes
+    g.strokeRect(Math.floor(left) + 0.5, Math.floor(top) + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     g.restore();
 
     // // (Optional) draw range for debugging:
