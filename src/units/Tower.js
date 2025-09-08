@@ -12,6 +12,13 @@ const RANGE_TILES = {
   heavy: 0.60, // ~0.6 tile
 };
 
+// ✅ Convert to *pixels* once up front to avoid unit mistakes elsewhere
+const RANGE_PX = {
+  basic: Math.round(RANGE_TILES.basic * TILE_SIZE * RANGE_TWEAK),
+  rapid: Math.round(RANGE_TILES.rapid * TILE_SIZE * RANGE_TWEAK),
+  heavy: Math.round(RANGE_TILES.heavy * TILE_SIZE * RANGE_TWEAK),
+};
+
 export class Tower {
   // --- Pricing knobs ---
   static baseCosts = { basic: 50, rapid: 80, heavy: 120 };
@@ -58,14 +65,14 @@ export class Tower {
     this.y = ty * TILE_SIZE + TILE_SIZE / 2;
 
     // ---- Stats ----
-    // Range: convert tiles -> pixels and apply tweak
-    const tiles = RANGE_TILES[type] ?? RANGE_TILES.basic;
-    this.range = tiles * TILE_SIZE * RANGE_TWEAK; // pixels
+    // Range: pick precomputed pixels and cache range^2 for fast checks
+    this.range = RANGE_PX[type] ?? RANGE_PX.basic; // pixels
+    this.range2 = this.range * this.range;
 
     // Damage / fire rate
     const baseStats = {
       basic: { damage: 10, fireRate: 1.0 },
-      rapid: { damage:  6, fireRate: 2.0 },
+      rapid: { damage:  6, fireRate: 2.0 }, // set to 3.0 if you want a true "rapid" feel
       heavy: { damage: 20, fireRate: 0.6 },
     }[type] || { damage: 8, fireRate: 1.0 };
 
@@ -97,16 +104,22 @@ export class Tower {
 
   upgrade(kind) {
     if (kind === 'damage' && this.damageLevel < this.maxUpgradeLevel) {
-      this.damageLevel++; this.damage = Math.round(this.damage * 1.25); return true;
+      this.damageLevel++;
+      this.damage = Math.round(this.damage * 1.25);
+      return true;
     }
     if (kind === 'range' && this.rangeLevel < this.maxUpgradeLevel) {
       // Gentle multiplicative bump
       this.rangeLevel++;
-      this.range = +(this.range * 1.10).toFixed(3); // +10% per range upgrade
+      this.range = Math.round(this.range * 1.10); // +10% per range upgrade
+      this.range2 = this.range * this.range;      // keep squared cache in sync
       return true;
     }
     if (kind === 'fireRate' && this.fireRateLevel < this.maxUpgradeLevel) {
-      this.fireRateLevel++; this.fireRate = +(this.fireRate * 1.20).toFixed(3); return true;
+      this.fireRateLevel++;
+      // store with a tiny rounding to avoid floating error accumulation
+      this.fireRate = +((this.fireRate * 1.20).toFixed(3));
+      return true;
     }
     return false;
   }
@@ -115,23 +128,41 @@ export class Tower {
   _inRange(enemy) {
     const dx = enemy.x - this.x;
     const dy = enemy.y - this.y;
-    return (dx * dx + dy * dy) <= this.range * this.range;
+    return (dx * dx + dy * dy) <= this.range2;
+  }
+
+  _acquireTarget(enemies, spatialGrid) {
+    let candidates = enemies;
+
+    if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
+      candidates = spatialGrid.queryCircle(this.x, this.y, this.range) || enemies;
+    }
+
+    // Choose nearest valid target inside actual range
+    let best = null;
+    let bestD2 = Infinity;
+
+    for (let i = 0; i < candidates.length; i++) {
+      const e = candidates[i];
+      if (!e || e.isDead || e.reachedEnd) continue;
+      const dx = e.x - this.x, dy = e.y - this.y;
+      const d2 = dx * dx + dy * dy;
+      if (d2 <= this.range2 && d2 < bestD2) {
+        best = e;
+        bestD2 = d2;
+      }
+    }
+    return best;
   }
 
   // Minimal shooting API expected by Game.js
   update(dt, enemies, projectiles, spatialGrid, projectilePool) {
+    // Cooldown tick
     this._cooldown -= dt;
     if (this._cooldown > 0) return false;
 
-    // Find a target (prefer spatial grid), but ALWAYS re-check exact distance.
-    let target = null;
-    if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
-      const candidates = spatialGrid.queryCircle(this.x, this.y, this.range);
-      target = candidates.find(e => !e.isDead && !e.reachedEnd && this._inRange(e));
-    } else {
-      target = enemies.find(e => !e.isDead && !e.reachedEnd && this._inRange(e));
-    }
-
+    // Find target
+    const target = this._acquireTarget(enemies, spatialGrid);
     if (!target) return false;
 
     // Fire projectile
@@ -141,9 +172,13 @@ export class Tower {
       projectiles.push(p);
     } else {
       projectiles.push({
-        x: this.x, y: this.y, target,
-        damage: this.damage, speed: 250,
-        done: false, hitTarget: false
+        x: this.x,
+        y: this.y,
+        target,
+        damage: this.damage,
+        speed: 250,
+        done: false,
+        hitTarget: false,
       });
     }
 

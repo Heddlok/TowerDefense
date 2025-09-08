@@ -176,11 +176,13 @@ export class Game {
 
     this.updateUI();
 
+    // Planning countdown
     if (this.phase === 'planning') {
       this.planningTime -= 1 / 60;
       if (this.planningTime <= 0) this.startWave();
     }
 
+    // Wave end check
     if (!this.gameOver && this.phase === 'combat') {
       if (!this.spawning && this.enemies.length === 0) {
         this.phase = 'planning';
@@ -207,38 +209,41 @@ export class Game {
       }
     }
 
-    // Spatial grid
+    // Spatial grid (always reflect current enemies)
     this.spatialGrid.clear();
     for (const e of this.enemies) this.spatialGrid.insert(e);
 
-    // Towers
-    for (const t of this.towers) {
-      const shot = t.update(1 / 60, this.enemies, this.projectiles, this.spatialGrid, this.projectilePool);
-      if (shot) this.soundManager.playShoot();
-    }
-
-    // Projectiles
-    for (let i = this.projectiles.length - 1; i >= 0; i--) {
-      const p = this.projectiles[i];
-      p.update(1 / 60);
-
-      if (p.hitTarget && p.target && !p.target.isDead && !p.target.reachedEnd) {
-        const killed = (typeof p.target.takeDamage === 'function')
-          ? p.target.takeDamage(p.damage)
-          : ((p.target.hp -= (Number.isFinite(p.damage) ? Math.max(0, p.damage) : 0)),
-            (p.target.hp <= 1e-6 ? (p.target.hp = 0, p.target.isDead = true, true) : false));
-
-        if (killed && !p.target._rewardGranted) {
-          this.money += Math.max(0, p.target.reward | 0);
-          p.target._rewardGranted = true;
-          this.soundManager.playEnemyDeath();
-        }
-        p.done = true;
+    // ---------- Towers & Projectiles only during combat ----------
+    if (this.phase === 'combat') {
+      // Towers
+      for (const t of this.towers) {
+        const shot = t.update(1 / 60, this.enemies, this.projectiles, this.spatialGrid, this.projectilePool);
+        if (shot) this.soundManager.playShoot();
       }
 
-      if (p.done) {
-        this.projectilePool.release(p);
-        this.projectiles.splice(i, 1);
+      // Projectiles
+      for (let i = this.projectiles.length - 1; i >= 0; i--) {
+        const p = this.projectiles[i];
+        p.update(1 / 60);
+
+        if (p.hitTarget && p.target && !p.target.isDead && !p.target.reachedEnd) {
+          const killed = (typeof p.target.takeDamage === 'function')
+            ? p.target.takeDamage(p.damage)
+            : ((p.target.hp -= (Number.isFinite(p.damage) ? Math.max(0, p.damage) : 0)),
+              (p.target.hp <= 1e-6 ? (p.target.hp = 0, p.target.isDead = true, true) : false));
+
+          if (killed && !p.target._rewardGranted) {
+            this.money += Math.max(0, p.target.reward | 0);
+            p.target._rewardGranted = true;
+            this.soundManager.playEnemyDeath();
+          }
+          p.done = true;
+        }
+
+        if (p.done) {
+          this.projectilePool.release(p);
+          this.projectiles.splice(i, 1);
+        }
       }
     }
   }
