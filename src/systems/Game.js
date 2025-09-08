@@ -229,23 +229,23 @@ export class Game {
     const basicBtn = document.getElementById('basicTowerBtn');
     const rapidBtn = document.getElementById('rapidTowerBtn');
     const heavyBtn = document.getElementById('heavyTowerBtn');
-    
+
     if (basicBtn) {
-      const basicCost = Tower.getCurrentCost('basic');
+      const basicCost = Tower.getNextTowerCost('basic');
       const basicCount = Tower.towerCounts.basic;
       basicBtn.textContent = `Basic (${basicCost}) [${basicCount} built]`;
       basicBtn.disabled = this.gameOver || this.money < basicCost;
     }
-    
+
     if (rapidBtn) {
-      const rapidCost = Tower.getCurrentCost('rapid');
+      const rapidCost = Tower.getNextTowerCost('rapid');
       const rapidCount = Tower.towerCounts.rapid;
       rapidBtn.textContent = `Rapid (${rapidCost}) [${rapidCount} built]`;
       rapidBtn.disabled = this.gameOver || this.money < rapidCost;
     }
-    
+
     if (heavyBtn) {
-      const heavyCost = Tower.getCurrentCost('heavy');
+      const heavyCost = Tower.getNextTowerCost('heavy');
       const heavyCount = Tower.towerCounts.heavy;
       heavyBtn.textContent = `Heavy (${heavyCost}) [${heavyCount} built]`;
       heavyBtn.disabled = this.gameOver || this.money < heavyCost;
@@ -275,12 +275,12 @@ export class Game {
     if (this.wave <= 3) {
       weights = { basic: 1, fast: 0, tank: 0 };
     } else {
-      const t = Math.max(0, this.wave - 3);                 // waves since "variety" unlocked
-      let fastW = Math.min(0.40, 0.05 + 0.02 * t);          // ~5% at wave 4, +2%/wave → cap 40%
+      const t = Math.max(0, this.wave - 3);                   // waves since "variety" unlocked
+      let fastW = Math.min(0.40, 0.05 + 0.02 * t);            // ~5% at wave 4, +2%/wave → cap 40%
       let tankW = Math.min(0.35, 0.015 * Math.max(0, t - 2)); // starts ~wave 6, +1.5%/wave → cap 35%
-      let basicW = Math.max(0.15, 1 - fastW - tankW);       // always keep >=15% basics
+      let basicW = Math.max(0.15, 1 - fastW - tankW);         // always keep >=15% basics
 
-      const sum = basicW + fastW + tankW;                   // normalize just in case
+      const sum = basicW + fastW + tankW;                     // normalize just in case
       weights = { basic: basicW / sum, fast: fastW / sum, tank: tankW / sum };
     }
 
@@ -348,6 +348,7 @@ export class Game {
       this.hideUpgradePanel();
     }
   }
+
   toggleSound() {
     this.soundManager.toggle();
     const btn = document.getElementById('soundToggleBtn');
@@ -391,12 +392,15 @@ export class Game {
   upgradeTower(upgradeType) {
     if (!this.selectedTower) return;
 
-    const result = this.selectedTower.upgrade(upgradeType, { amount: this.money });
-    if (result.success) {
-      this.money = { amount: this.money }.amount; // Handle money deduction from Tower class
-      this.soundManager.playTowerPlace(); // Reuse sound for upgrade
-      
-      // Update the panel
+    const cost = this.selectedTower.getUpgradeCost(upgradeType);
+    if (!Number.isFinite(cost) || cost === Infinity) return;
+    if (this.money < cost) return;
+
+    this.money -= cost;
+    const ok = this.selectedTower.upgrade(upgradeType);
+    if (ok) {
+      this.soundManager.playTowerPlace(); // Reuse place sound for upgrade
+      // Update the panel with new stats/costs
       this.showUpgradePanel(this.selectedTower);
     }
   }
@@ -458,12 +462,15 @@ export class Game {
     if (isOnPath(tx, ty, this.path)) return; // cannot build on path
     if (this.towers.some(t => t.tx === tx && t.ty === ty)) return; // occupied
 
-    // Use Tower class static method for cost calculation
-    const cost = Tower.getCurrentCost(this.selectedTowerType);
+    // Quote current price and buy safely
+    const type = this.selectedTowerType;
+    const cost = Tower.getNextTowerCost(type);
     if (this.money < cost) return;
 
     this.money -= cost;
-    this.towers.push(new Tower(tx, ty, this.selectedTowerType));
+    const t = new Tower(tx, ty, type, cost); // record actual price paid
+    this.towers.push(t);
+    Tower.registerPurchase(type);            // advance pricing AFTER successful buy
     this.soundManager.playTowerPlace();
   }
 
