@@ -1,5 +1,5 @@
 // systems/Game.js
-import { createPath, TILE_SIZE, GRID_COLS, GRID_ROWS, isOnPath } from '../world/map.js';
+import { createPath, TILE_SIZE, GRID_COLS, GRID_ROWS } from '../world/map.js';
 import { Enemy } from '../units/Enemy.js';
 import { Tower } from '../units/Tower.js';
 import { Projectile } from '../units/OptimizedProjectile.js';
@@ -8,6 +8,38 @@ import { ObjectPool } from '../utils/ObjectPool.js';
 import { SpatialGrid } from '../utils/SpatialGrid.js';
 import { PerformanceMonitor } from '../utils/PerformanceMonitor.js';
 import { getWavePlan, getWaveScaling } from './Difficulty.js';
+
+// -------- Path rasterization helpers (exact tile mask) --------
+const _k = (x, y) => `${x},${y}`;
+
+/** Convert a polyline path (tile coords) into a Set of blocked tiles */
+function rasterizePathToMask(path) {
+  const mask = new Set();
+  if (!Array.isArray(path) || path.length < 2) return mask;
+
+  const toInt = (v) => (typeof v === 'number' ? (v | 0) : (v && v.x !== undefined ? (v.x | 0) : 0));
+  const toIntY = (v) => (typeof v === 'number' ? (v | 0) : (v && v.y !== undefined ? (v.y | 0) : 0));
+
+  for (let i = 0; i < path.length - 1; i++) {
+    let x0 = toInt(path[i]),     y0 = toIntY(path[i]);
+    const x1 = toInt(path[i+1]), y1 = toIntY(path[i+1]);
+
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+
+    while (true) {
+      mask.add(_k(x0, y0));
+      if (x0 === x1 && y0 === y1) break;
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; x0 += sx; }
+      if (e2 <  dx) { err += dx; y0 += sy; }
+    }
+  }
+  return mask;
+}
 
 export class Game {
   constructor(canvas, ctx) {
@@ -21,9 +53,11 @@ export class Game {
     this.gameOver = false;
     this.phase = 'planning'; // 'planning' | 'combat'
     this.planningTime = 5.0; // seconds between waves
-    this.spawning = false; // true while current wave is still spawning
+    this.spawning = false;   // true while current wave is still spawning
 
     this.path = createPath();
+    this.pathMask = rasterizePathToMask(this.path);
+
     this.enemies = [];
     this.towers = [];
     this.projectiles = [];
@@ -36,10 +70,10 @@ export class Game {
     this._muted = false;
     this.soundManager = new SoundManager();
 
-    // Performance optimizations
+    // Performance / spatial
     this.perfMonitor = new PerformanceMonitor();
     this.spatialGrid = new SpatialGrid(canvas.width, canvas.height, TILE_SIZE);
-    this.currentRenderScale = 1; // track current scale for accurate input mapping
+    this.currentRenderScale = 1; // for accurate input mapping
 
     // Object pools
     this.enemyPool = new ObjectPool(
@@ -47,14 +81,13 @@ export class Game {
       (enemy) => enemy.reset(),
       20
     );
-
     this.projectilePool = new ObjectPool(
       () => new Projectile(),
       (proj) => proj.reset(),
       50
     );
 
-    // Reset tower counts when starting a new game
+    // Reset tower counts for new run
     Tower.resetCounts();
 
     // Events
@@ -63,7 +96,7 @@ export class Game {
     canvas.addEventListener('mousemove', this._onMouseMove);
     canvas.addEventListener('click', this._onClick);
 
-    // Ensure hover tooltip never blocks clicks/taps
+    // Hover tooltip should never block input
     const hi = document.getElementById('hoverInfo');
     if (hi) {
       hi.style.pointerEvents = 'none';
@@ -77,7 +110,6 @@ export class Game {
 
   selectTower(type) {
     this.selectedTowerType = type;
-    // Avoid conflicting modes while placing
     this.sellMode = false;
     this.upgradeMode = false;
     this.selectedTower = null;
@@ -88,7 +120,7 @@ export class Game {
     this.sellMode = !this.sellMode;
     if (this.sellMode) {
       this.upgradeMode = false;
-      this.selectedTowerType = null; // do not place while selling
+      this.selectedTowerType = null;
       this.selectedTower = null;
       this.hideUpgradePanel();
     }
@@ -99,7 +131,7 @@ export class Game {
     this.upgradeMode = !this.upgradeMode;
     if (this.upgradeMode) {
       this.sellMode = false;
-      this.selectedTowerType = null; // upgrades target existing towers
+      this.selectedTowerType = null;
     } else {
       this.selectedTower = null;
       this.hideUpgradePanel();
@@ -118,33 +150,25 @@ export class Game {
     if (btn) btn.textContent = this._muted ? 'Sound: Off' : 'Sound: On';
   }
 
-  // Acts on the currently selected tower (selected via click while in upgrade mode)
   upgradeTower(stat) {
     const t = this.selectedTower;
     if (!t) return;
 
-    // Prefer tower's own upgrade API if present
     if (typeof t.upgrade === 'function') {
       t.upgrade(stat);
     } else if (typeof t.tryUpgrade === 'function') {
       t.tryUpgrade(stat);
     } else {
-      // Fallback: simple inline upgrades
+      // Fallback upgrades
       switch (stat) {
-        case 'damage':
-          t.damage = (t.damage ?? 5) + 1;
-          break;
-        case 'range':
-          t.range = (t.range ?? (TILE_SIZE * 2)) + TILE_SIZE * 0.25;
-          break;
+        case 'damage': t.damage = (t.damage ?? 5) + 1; break;
+        case 'range':  t.range  = (t.range  ?? (TILE_SIZE * 2)) + TILE_SIZE * 0.25; break;
         case 'fireRate':
-          // lower fireRate = faster shooting (if that's your API)
           t.fireRate = Math.max(0.05, (t.fireRate ?? 1) * 0.9);
           break;
       }
     }
-
-    this.showUpgradePanel(t); // keep panel visible/updated
+    this.showUpgradePanel(t);
     this.updateUI();
   }
 
@@ -152,10 +176,24 @@ export class Game {
     const panel = document.getElementById('upgradePanel');
     if (panel) panel.style.display = 'block';
   }
-
   hideUpgradePanel() {
     const panel = document.getElementById('upgradePanel');
     if (panel) panel.style.display = 'none';
+  }
+
+  // -----------------------------
+  // Placement helpers (use exact mask)
+  // -----------------------------
+
+  isOnPathTile(tx, ty) {
+    return this.pathMask?.has(_k(tx, ty)) === true;
+  }
+
+  canBuildHere(tx, ty) {
+    if (tx < 0 || ty < 0 || tx >= GRID_COLS || ty >= GRID_ROWS) return false;
+    if (this.isOnPathTile(tx, ty)) return false;
+    if (this.towers.some(t => t.tx === tx && t.ty === ty)) return false;
+    return true;
   }
 
   // -----------------------------
@@ -269,7 +307,7 @@ export class Game {
 
     g.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // grid
+    // grid + path tiles (use exact mask)
     g.fillStyle = '#0e1520';
     g.fillRect(0, 0, this.canvas.width, this.canvas.height);
     for (let y = 0; y < GRID_ROWS; y++) {
@@ -277,14 +315,14 @@ export class Game {
         const px = x * TILE_SIZE, py = y * TILE_SIZE;
         g.strokeStyle = '#1f2836';
         g.strokeRect(px, py, TILE_SIZE, TILE_SIZE);
-        if (isOnPath(x, y, this.path)) {
+        if (this.isOnPathTile(x, y)) {
           g.fillStyle = '#2b3a4f';
           g.fillRect(px, py, TILE_SIZE, TILE_SIZE);
         }
       }
     }
 
-    // path outline
+    // path outline (polyline)
     g.strokeStyle = '#3b516f';
     g.lineWidth = 2;
     g.beginPath();
@@ -327,7 +365,6 @@ export class Game {
   }
 
   updateUI() {
-    // Use safe setters to avoid null errors
     const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
 
     setText('money', this.money);
@@ -339,11 +376,10 @@ export class Game {
     const planningEl = document.getElementById('planning');
     if (planningEl) planningEl.textContent = this.phase === 'planning' ? `${Math.max(0, this.planningTime).toFixed(1)}s` : '—';
 
-    // Performance stats
     const stats = this.perfMonitor.getStats();
     setText('fps', stats.fps);
 
-    // Update tower button costs using Tower class static method
+    // Update tower button labels/costs
     const basicBtn = document.getElementById('basicTowerBtn');
     const rapidBtn = document.getElementById('rapidTowerBtn');
     const heavyBtn = document.getElementById('heavyTowerBtn');
@@ -370,14 +406,12 @@ export class Game {
     const sellBtn = document.getElementById('sellModeBtn');
     if (sellBtn) sellBtn.disabled = this.gameOver === true;
 
-    // ---- LIVE COST READOUTS ----
+    // Live cost readout
     const costEl = document.getElementById('cost');
     if (costEl) {
-      if (this.selectedTowerType) {
-        costEl.textContent = `Cost: ${Tower.getNextTowerCost(this.selectedTowerType)}`;
-      } else {
-        costEl.textContent = 'Cost: —';
-      }
+      costEl.textContent = this.selectedTowerType
+        ? `Cost: ${Tower.getNextTowerCost(this.selectedTowerType)}`
+        : 'Cost: —';
     }
     const bc = document.getElementById('basicCost');
     const rc = document.getElementById('rapidCost');
@@ -387,17 +421,15 @@ export class Game {
     if (hc) hc.textContent = String(Tower.getNextTowerCost('heavy'));
   }
 
-  // Map mouse to *canvas pixel space*, then undo renderScale, then to tile coords.
+  // Map mouse to canvas pixel space, undo renderScale, then to tile coords.
   screenToTile(e) {
     const rect = this.canvas.getBoundingClientRect();
 
-    // Map CSS pixels -> canvas pixels (handles DPR and CSS size differences)
     const scaleX = this.canvas.width / rect.width;
     const scaleY = this.canvas.height / rect.height;
     let mxCanvas = (e.clientX - rect.left) * scaleX;
     let myCanvas = (e.clientY - rect.top) * scaleY;
 
-    // Undo our rendering scale so hit tests match what we drew
     const rs = this.currentRenderScale || 1;
     if (rs !== 1) {
       mxCanvas /= rs;
@@ -407,7 +439,6 @@ export class Game {
     const tx = Math.floor(mxCanvas / TILE_SIZE);
     const ty = Math.floor(myCanvas / TILE_SIZE);
 
-    // Also return CSS-space coords for positioning DOM tooltips
     const cssX = (e.clientX - rect.left);
     const cssY = (e.clientY - rect.top);
 
@@ -448,7 +479,7 @@ export class Game {
       if (idx >= 0) {
         const [sold] = this.towers.splice(idx, 1);
         this.money += sold.getSellValue();
-        // Optionally: Tower.deregisterOnSell(sold.type);
+        // Optional: Tower.deregisterOnSell(sold.type);
       }
       return;
     }
@@ -466,9 +497,7 @@ export class Game {
     }
 
     if (!this.selectedTowerType) return;
-    if (tx < 0 || ty < 0 || tx >= GRID_COLS || ty >= GRID_ROWS) return; // guard
-    if (isOnPath(tx, ty, this.path)) return;                              // cannot build on path
-    if (this.towers.some(t => t.tx === tx && t.ty === ty)) return;        // occupied
+    if (!this.canBuildHere(tx, ty)) return;
 
     // Quote current price and buy safely
     const type = this.selectedTowerType;
@@ -486,17 +515,15 @@ export class Game {
     if (this.gameOver) return;
 
     try {
-      // Enter combat + advance wave counter
       this.phase = 'combat';
       this.wave += 1;
       this.soundManager.playWaveStart();
 
-      // Safe difficulty knobs for this wave
       const s = getWaveScaling?.(this.wave) || {};
       const scaling = {
-        hpMul:    Number.isFinite(s.hpMul)    ? s.hpMul    : 1,
-        speedMul: Number.isFinite(s.speedMul) ? s.speedMul : 1,
-        rewardMul:Number.isFinite(s.rewardMul)? s.rewardMul: 1,
+        hpMul:     Number.isFinite(s.hpMul)     ? s.hpMul     : 1,
+        speedMul:  Number.isFinite(s.speedMul)  ? s.speedMul  : 1,
+        rewardMul: Number.isFinite(s.rewardMul) ? s.rewardMul : 1,
       };
 
       const p = getWavePlan?.(this.wave) || {};
@@ -506,9 +533,7 @@ export class Game {
         burstBonus: Number.isFinite(p.burstBonus) ? p.burstBonus : 0,
       };
 
-      // ---- ENEMY COMPOSITION RULES ----
-      // Waves 1–3: ONLY basic enemies (no exceptions).
-      // After that: gradually add fast first, then tanks a bit later.
+      // Composition
       let weights;
       if (this.wave <= 3) {
         weights = { basic: 1, fast: 0, tank: 0 };
@@ -533,7 +558,6 @@ export class Game {
 
       const totalToSpawn = Math.max(0, (plan.count || 0) + (plan.burstBonus || 0));
       if (totalToSpawn === 0) {
-        // No enemies this wave — immediately go back to planning so game doesn't stall
         this.spawning = false;
         this.phase = 'planning';
         this.planningTime = 5.0;
@@ -548,14 +572,13 @@ export class Game {
         if (spawned >= totalToSpawn) { this.spawning = false; return; }
 
         let type = pickType();
-        if (this.wave <= 3) type = 'basic'; // redundant guard
+        if (this.wave <= 3) type = 'basic';
 
         const enemy = this.enemyPool.get();
         enemy.init(type, scaling);
         this.enemies.push(enemy);
         spawned++;
 
-        // Spawn pacing (seconds) with light jitter and a floor
         const jitter = (Math.random() * 0.12) - 0.06; // ±0.06s
         const base = Number.isFinite(plan.interval) ? plan.interval : 1.0;
         const intervalSec = Math.max(0.10, base + jitter);
@@ -564,7 +587,6 @@ export class Game {
 
       spawnOne();
     } catch (err) {
-      // Graceful fallback to avoid a hard freeze
       console.error('startWave failed:', err);
       this.spawning = false;
       this.phase = 'planning';
@@ -582,7 +604,6 @@ export class Game {
     g.restore();
   }
 
-  // Optional: clean up listeners if you ever dispose/recreate the game
   destroy() {
     this.canvas.removeEventListener('mousemove', this._onMouseMove);
     this.canvas.removeEventListener('click', this._onClick);
