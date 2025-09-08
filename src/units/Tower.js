@@ -3,7 +3,7 @@ import { TILE_SIZE } from '../world/map.js';
 import { Projectile } from './OptimizedProjectile.js';
 
 // Global multiplier for all ranges
-const RANGE_TWEAK = 0.90;
+const RANGE_TWEAK = 1.30;
 
 // Range defined in tiles, converted once to pixels
 const RANGE_TILES = { basic: 1.00, rapid: 0.80, heavy: 0.60 };
