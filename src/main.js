@@ -4,16 +4,16 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const game = new Game(canvas, ctx);
 
-// UI wiring
+// UI wiring (use pointerdown for immediate, reliable taps/clicks)
 document.querySelectorAll('.tower-btn').forEach(btn => {
-  btn.addEventListener('click', () => game.selectTower(btn.dataset.tower));
+  btn.addEventListener('pointerdown', () => game.selectTower(btn.dataset.tower), { passive: true });
 });
-document.getElementById('sellModeBtn').addEventListener('click', () => game.toggleSellMode());
-document.getElementById('upgradeModeBtn').addEventListener('click', () => game.toggleUpgradeMode());
-document.getElementById('soundToggleBtn').addEventListener('click', () => game.toggleSound());
-document.getElementById('upgradeDamageBtn').addEventListener('click', () => game.upgradeTower('damage'));
-document.getElementById('upgradeRangeBtn').addEventListener('click', () => game.upgradeTower('range'));
-document.getElementById('upgradeFireRateBtn').addEventListener('click', () => game.upgradeTower('fireRate'));
+document.getElementById('sellModeBtn').addEventListener('pointerdown', () => game.toggleSellMode(), { passive: true });
+document.getElementById('upgradeModeBtn').addEventListener('pointerdown', () => game.toggleUpgradeMode(), { passive: true });
+document.getElementById('soundToggleBtn').addEventListener('pointerdown', () => game.toggleSound(), { passive: true });
+document.getElementById('upgradeDamageBtn').addEventListener('pointerdown', () => game.upgradeTower('damage'), { passive: true });
+document.getElementById('upgradeRangeBtn').addEventListener('pointerdown', () => game.upgradeTower('range'), { passive: true });
+document.getElementById('upgradeFireRateBtn').addEventListener('pointerdown', () => game.upgradeTower('fireRate'), { passive: true });
 
 // ---- Fixed-step loop with background fallback ----
 const STEP = 1000 / 60; // 60 FPS sim step (ms)

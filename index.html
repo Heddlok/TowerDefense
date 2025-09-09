@@ -20,16 +20,18 @@
         <div class="controls">
           <button id="sellModeBtn">Sell: Off</button>
           <button id="upgradeModeBtn">Upgrade: Off</button>
-          <button id="soundToggleBtn">🔊 Sound</button>
+          <button id="soundToggleBtn">Sound: On</button>
         </div>
       </header>
+
       <main>
         <aside class="sidebar">
           <h2>Towers</h2>
-          <button class="tower-btn" data-tower="basic">Basic ($50)</button>
-          <button class="tower-btn" data-tower="rapid">Rapid ($80)</button>
-          <button class="tower-btn" data-tower="heavy">Heavy ($120)</button>
-          
+          <!-- IDs are optional; JS uses .tower-btn[data-tower], but IDs serve as a safe fallback -->
+          <button id="basicTowerBtn" class="tower-btn" data-tower="basic" aria-disabled="false">Basic ($50)</button>
+          <button id="rapidTowerBtn" class="tower-btn" data-tower="rapid" aria-disabled="false">Rapid ($80)</button>
+          <button id="heavyTowerBtn" class="tower-btn" data-tower="heavy" aria-disabled="false">Heavy ($120)</button>
+
           <div id="upgradePanel" class="upgrade-panel" style="display: none;">
             <h3>Tower Upgrades</h3>
             <div class="upgrade-stats">
@@ -47,18 +49,18 @@
             </div>
           </div>
         </aside>
+
         <section class="canvas-wrap">
           <canvas id="game" width="960" height="640"></canvas>
           <div id="hoverInfo"></div>
         </section>
       </main>
+
       <footer>
-        <a href="https://github.com/" target="_blank" rel="noreferrer">Source on GitHub</a>
+        <a href="https://github.com/Heddlok/TowerDefense" target="_blank" rel="noopener noreferrer">Source on GitHub</a>
       </footer>
     </div>
 
     <script type="module" src="src/main.js"></script>
   </body>
-  </html>
-
-
+</html>

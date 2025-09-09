@@ -63,7 +63,7 @@ export class Game {
     this.pathMask = maskFromSteps(this.path);
 
     this.enemies = [];
-    this.towers = [];
+       this.towers = [];
     this.projectiles = [];
     this.hoverTile = null;
 
@@ -364,8 +364,14 @@ export class Game {
       const c = Tower.getNextTowerCost(type);
       const n = Tower.towerCounts[type] ?? 0;
       const label = type[0].toUpperCase() + type.slice(1);
+      const unaffordable = this.gameOver || this.money < c;
+
       btn.textContent = `${label} (${c}) [${n} built]`;
-      btn.disabled = this.gameOver || this.money < c;
+
+      // IMPORTANT: don't flip the real disabled flag every frame (it cancels clicks)
+      btn.classList.toggle('unaffordable', unaffordable);
+      btn.setAttribute('aria-disabled', unaffordable ? 'true' : 'false');
+      // btn.disabled = unaffordable; // ← removed on purpose
     };
 
     syncBtn('basic'); syncBtn('rapid'); syncBtn('heavy');
