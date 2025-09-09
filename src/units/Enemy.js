@@ -6,17 +6,24 @@ export class Enemy {
 
   reset() {
     this.type = 'basic';
-    this.x = 0; this.y = 0;            // ALWAYS pixels (center)
+
+    // ALWAYS pixels (center)
+    this.x = 0; this.y = 0;
+
+    // Base stats (will be overridden in init)
     this.maxHp = 1; this.hp = 1;
-    this.speed = 70;                   // px/s
+    this.speed = 70;          // px/s
     this.reward = 5;
 
+    // Lifecycle flags
     this.isDead = false;
     this.reachedEnd = false;
+    this._rewardGranted = false; // ← critical for pooling / payout
 
-    this.path = null;                  // array of {x,y} in TILES
-    this.seg = 0;                      // index of target tile (moving seg-1 -> seg)
-    this._tx = 0; this._ty = 0;        // current target in pixels
+    // Pathing: array of {x,y} in TILES
+    this.path = null;
+    this.seg = 0;             // moving from seg-1 -> seg
+    this._tx = 0; this._ty = 0; // current target in pixels
   }
 
   _tileCenterPx(t) {
@@ -26,15 +33,20 @@ export class Enemy {
   setPath(path) {
     this.path = Array.isArray(path) ? path : null;
     if (!this.path || this.path.length < 2) { this.reachedEnd = true; return; }
+
     const a = this._tileCenterPx(this.path[0]);
     const b = this._tileCenterPx(this.path[1]);
-    this.x = a.x; this.y = a.y;        // spawn at first node (pixels)
-    this.seg = 1;                      // head to node #1
+
+    // spawn at first node (pixels), head to node #1
+    this.x = a.x; this.y = a.y;
+    this.seg = 1;
     this._tx = b.x; this._ty = b.y;
   }
 
   init(type, scaling = {}, path) {
+    // Full reinit for pooled enemies
     this.reset();
+
     this.type = type || 'basic';
 
     const base = {
@@ -53,6 +65,11 @@ export class Enemy {
     this.reward = Math.max(0, Math.round(base.reward * rewardMul));
 
     if (path) this.setPath(path);
+
+    // Ensure payout can occur after reuse
+    this._rewardGranted = false;
+    this.isDead = false;
+    this.reachedEnd = false;
   }
 
   takeDamage(dmg) {
@@ -64,6 +81,8 @@ export class Enemy {
 
   update(dt, pathFromCaller) {
     if (this.isDead || this.reachedEnd) return;
+
+    // Late path injection (first update)
     if (!this.path) {
       if (pathFromCaller) this.setPath(pathFromCaller);
       if (!this.path) return;
@@ -74,6 +93,7 @@ export class Enemy {
     const dist = Math.hypot(dx, dy);
 
     if (dist <= 0.0001) {
+      // Arrived at this node → advance segment
       this.seg++;
       if (this.seg >= this.path.length) { this.reachedEnd = true; return; }
       const n = this._tileCenterPx(this.path[this.seg]);
@@ -82,7 +102,12 @@ export class Enemy {
     }
 
     const step = this.speed * dt;
-    if (step >= dist) { this.x = this._tx; this.y = this._ty; return; }
+    if (step >= dist) {
+      // Snap to target; next frame will advance segment
+      this.x = this._tx; this.y = this._ty;
+      return;
+    }
+
     this.x += (dx / dist) * step;
     this.y += (dy / dist) * step;
   }

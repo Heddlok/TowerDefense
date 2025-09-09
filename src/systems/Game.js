@@ -99,16 +99,11 @@ export class Game {
   addMoney(amount) {
     const a = Number.isFinite(amount) ? amount : 0;
     this.money = Math.max(0, this.money + a);
-    // UI will refresh in update() → updateUI()
     return this.money;
   }
-
   trySpend(cost) {
     const c = Number.isFinite(cost) ? cost : 0;
-    if (this.money >= c) {
-      this.money -= c;
-      return true;
-    }
+    if (this.money >= c) { this.money -= c; return true; }
     return false;
   }
 
@@ -211,7 +206,7 @@ export class Game {
         }
       }
 
-      // --- PAYOUT SAFEGUARD: award on death here as well (covers edge cases & pooled enemies) ---
+      // --- PAYOUT SAFEGUARD ---
       if (enemy.isDead) {
         if (!enemy.reachedEnd && !enemy._rewardGranted) {
           const reward = Math.max(0, enemy.reward | 0);
@@ -232,7 +227,6 @@ export class Game {
 
     // ---------- Towers & Projectiles (combat only) ----------
     if (this.phase === 'combat') {
-      // IMPORTANT: bypass grid & pool to guarantee shooting
       for (const t of this.towers) {
         const shot = t.update(1 / 60, this.enemies, this.projectiles, /*spatialGrid*/ null, /*projectilePool*/ null);
         if (shot) this.soundManager.playShoot();
@@ -241,11 +235,9 @@ export class Game {
       for (let i = this.projectiles.length - 1; i >= 0; i--) {
         const p = this.projectiles[i];
 
-        // Guarded update so simple bullets won’t crash
         if (typeof p.update === 'function') {
           p.update(1 / 60);
         } else {
-          // If a bare object slipped in, auto-resolve hit so gameplay continues
           p.done = true;
           p.hitTarget = true;
         }
@@ -257,7 +249,6 @@ export class Game {
               (p.target.hp <= 1e-6 ? (p.target.hp = 0, p.target.isDead = true, true) : false));
 
           if (killed && !p.target._rewardGranted) {
-            // use helper to ensure UI sync
             this.addMoney(Math.max(0, p.target.reward | 0));
             p.target._rewardGranted = true;
             this.soundManager.playEnemyDeath();
@@ -266,7 +257,6 @@ export class Game {
         }
 
         if (p.done) {
-          // Release only if it’s a pooled projectile with reset(); ignore otherwise
           if (typeof p.reset === 'function') this.projectilePool.release(p);
           this.projectiles.splice(i, 1);
         }
@@ -316,7 +306,7 @@ export class Game {
     for (const t of this.towers) t.render(g);
     for (const e of this.enemies) e.render(g);
 
-    // Safe projectile render: draw if render() exists, else a small dot
+    // Safe projectile render
     for (const p of this.projectiles) {
       if (typeof p.render === 'function') {
         p.render(g);
@@ -363,28 +353,22 @@ export class Game {
     const stats = this.perfMonitor.getStats();
     setText('fps', stats.fps);
 
-    const basicBtn = document.getElementById('basicTowerBtn');
-    const rapidBtn = document.getElementById('rapidTowerBtn');
-    const heavyBtn = document.getElementById('heavyTowerBtn');
+    // ---- Match your main.js/HTML: dataset-based tower buttons ----
+    const btnFor = (type) =>
+      document.querySelector(`.tower-btn[data-tower="${type}"]`) ||
+      document.getElementById(`${type}TowerBtn`); // fallback if IDs exist too
 
-    if (basicBtn) {
-      const c = Tower.getNextTowerCost('basic');
-      const n = Tower.towerCounts.basic;
-      basicBtn.textContent = `Basic (${c}) [${n} built]`;
-      basicBtn.disabled = this.gameOver || this.money < c;
-    }
-    if (rapidBtn) {
-      const c = Tower.getNextTowerCost('rapid');
-      const n = Tower.towerCounts.rapid;
-      rapidBtn.textContent = `Rapid (${c}) [${n} built]`;
-      rapidBtn.disabled = this.gameOver || this.money < c;
-    }
-    if (heavyBtn) {
-      const c = Tower.getNextTowerCost('heavy');
-      const n = Tower.towerCounts.heavy;
-      heavyBtn.textContent = `Heavy (${c}) [${n} built]`;
-      heavyBtn.disabled = this.gameOver || this.money < c;
-    }
+    const syncBtn = (type) => {
+      const btn = btnFor(type);
+      if (!btn) return;
+      const c = Tower.getNextTowerCost(type);
+      const n = Tower.towerCounts[type] ?? 0;
+      const label = type[0].toUpperCase() + type.slice(1);
+      btn.textContent = `${label} (${c}) [${n} built]`;
+      btn.disabled = this.gameOver || this.money < c;
+    };
+
+    syncBtn('basic'); syncBtn('rapid'); syncBtn('heavy');
 
     const costEl = document.getElementById('cost');
     if (costEl) {
@@ -444,8 +428,7 @@ export class Game {
       const idx = this.towers.findIndex(t => t.tx === tx && t.ty === ty);
       if (idx >= 0) {
         const [sold] = this.towers.splice(idx, 1);
-        this.addMoney(sold.getSellValue()); // use helper
-        // keep price model in sync on sell
+        this.addMoney(sold.getSellValue());
         if (typeof Tower.registerSell === 'function') {
           Tower.registerSell(sold.type);
         } else if (Tower.towerCounts && sold.type in Tower.towerCounts) {
@@ -467,7 +450,7 @@ export class Game {
 
     const type = this.selectedTowerType;
     const cost = Tower.getNextTowerCost(type);
-    if (!this.trySpend(cost)) return; // use helper
+    if (!this.trySpend(cost)) return;
 
     const t = new Tower(tx, ty, type, cost);
     this.towers.push(t);
@@ -548,6 +531,9 @@ export class Game {
         else enemy.init(type, scaling);
         if (typeof enemy.setPath === 'function') enemy.setPath(this.path);
         else enemy.path = this.path;
+
+        // hard reset payout guard for pooled enemies
+        enemy._rewardGranted = false;
 
         this.enemies.push(enemy);
         spawned++;
