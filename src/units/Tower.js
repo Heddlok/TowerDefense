@@ -14,26 +14,42 @@ const RANGE_PX = {
 };
 
 export class Tower {
-  static baseCosts = { basic: 50, rapid: 80, heavy: 120 };
-  static priceMul  = { basic: 1.15, rapid: 1.17, heavy: 1.20 };
-  static towerCounts = { basic: 0, rapid: 0, heavy: 0 };
-  static resetCounts() { this.towerCounts = { basic: 0, rapid: 0, heavy: 0 }; }
+  // --- Pricing model ---
+  static baseCosts   = { basic: 50,  rapid: 80,  heavy: 120 };
+  static priceMul    = { basic: 1.15, rapid: 1.17, heavy: 1.20 };
+  static towerCounts = { basic: 0,    rapid: 0,   heavy: 0   };
 
+  static resetCounts() {
+    this.towerCounts = { basic: 0, rapid: 0, heavy: 0 };
+  }
+
+  // Price rises every 2 purchases (rounded)
   static getNextTowerCost(type) {
-    const base = this.baseCosts[type] ?? 0;
-    const mul  = this.priceMul[type] ?? 1.0;
-    const n    = this.towerCounts[type] ?? 0;
+    const base  = this.baseCosts[type]  ?? 0;
+    const mul   = this.priceMul[type]   ?? 1.0;
+    const n     = this.towerCounts[type] ?? 0;
     const steps = Math.floor(n / 2);
     return Math.max(1, Math.round(base * Math.pow(mul, steps)));
   }
-  static registerPurchase(type) { this.towerCounts[type] = (this.towerCounts[type] ?? 0) + 1; }
+
+  static registerPurchase(type) {
+    this.towerCounts[type] = (this.towerCounts[type] ?? 0) + 1;
+  }
+
+  // Added so selling a tower decrements the count and updates UI prices correctly
+  static registerSell(type) {
+    if (!(type in this.towerCounts)) return;
+    this.towerCounts[type] = Math.max(0, (this.towerCounts[type] | 0) - 1);
+  }
 
   static colors = { basic: '#4DB6FF', rapid: '#66BB6A', heavy: '#FFB74D' };
 
   constructor(tx, ty, type, purchasePrice) {
     this.tx = tx; this.ty = ty; this.type = type;
 
-    this.purchasePrice = Number.isFinite(purchasePrice) ? purchasePrice : Tower.getNextTowerCost(type);
+    this.purchasePrice = Number.isFinite(purchasePrice)
+      ? purchasePrice
+      : Tower.getNextTowerCost(type);
 
     // Pixel center
     this.x = tx * TILE_SIZE + TILE_SIZE / 2;
@@ -55,22 +71,33 @@ export class Tower {
 
     // Upgrades
     this.maxUpgradeLevel = 5;
-    this.damageLevel = 0; this.rangeLevel = 0; this.fireRateLevel = 0;
+    this.damageLevel = 0;
+    this.rangeLevel = 0;
+    this.fireRateLevel = 0;
 
     this._cooldown = 0;
   }
 
-  getSellValue() { return Math.floor(this.purchasePrice * 0.75); }
+  getSellValue() {
+    return Math.floor(this.purchasePrice * 0.75);
+  }
 
   upgrade(kind) {
     if (kind === 'damage' && this.damageLevel < this.maxUpgradeLevel) {
-      this.damageLevel++; this.damage = Math.round(this.damage * 1.25); return true;
+      this.damageLevel++;
+      this.damage = Math.round(this.damage * 1.25);
+      return true;
     }
     if (kind === 'range' && this.rangeLevel < this.maxUpgradeLevel) {
-      this.rangeLevel++; this.range = Math.round(this.range * 1.10); this.range2 = this.range * this.range; return true;
+      this.rangeLevel++;
+      this.range = Math.round(this.range * 1.10);
+      this.range2 = this.range * this.range;
+      return true;
     }
     if (kind === 'fireRate' && this.fireRateLevel < this.maxUpgradeLevel) {
-      this.fireRateLevel++; this.fireRate = +((this.fireRate * 1.20).toFixed(3)); return true;
+      this.fireRateLevel++;
+      this.fireRate = +((this.fireRate * 1.20).toFixed(3));
+      return true;
     }
     return false;
   }
@@ -81,20 +108,21 @@ export class Tower {
 
     let dx = ex - this.x, dy = ey - this.y;
     let d2 = dx * dx + dy * dy;
-    const r2 = this.range * this.range;
+    const r2 = this.range2;
 
     if (d2 <= r2) return true;
 
+    // If enemy position is in tile-space (rare), convert to pixel center
     const looksTileSpace =
       ex >= 0 && ey >= 0 &&
       ex < GRID_COLS && ey < GRID_ROWS &&
       Math.abs(ex - Math.round(ex)) < 1e-3 &&
-      Math.abs*(ey - Math.round(ey)) < 1e-3;
+      Math.abs(ey - Math.round(ey)) < 1e-3;
 
     if (looksTileSpace) {
       const px = ex * TILE_SIZE + TILE_SIZE / 2;
       const py = ey * TILE_SIZE + TILE_SIZE / 2;
-      dx = px - this.x; dy = py - this.py;
+      dx = px - this.x; dy = py - this.y;
       d2 = dx * dx + dy * dy;
       return d2 <= r2;
     }
@@ -104,41 +132,44 @@ export class Tower {
   _acquireTarget(enemies, spatialGrid) {
     let candidates = enemies;
 
+    // Optional spatial query if provided
     if (spatialGrid && typeof spatialGrid.queryCircle === 'function') {
       const list = spatialGrid.queryCircle(this.x, this.y, this.range);
-      if (Array.isArray(list) && list.length > 0 ) {
-        candidates = list;
+      if (Array.isArray(list) && list.length > 0) candidates = list;
     }
-  }
 
-  let best = null, bestD2 = Infinity;
-  const r2 = this.range * this.range;
+    let best = null, bestD2 = Infinity;
+    const r2 = this.range2;
 
-  for (let i = 0; i < candidates.length; i++) {
-    const e = candidates[i];
-    if (!e || e.isDead || e.reachedEnd) continue;
+    for (let i = 0; i < candidates.length; i++) {
+      const e = candidates[i];
+      if (!e || e.isDead || e.reachedEnd) continue;
 
-    const ex = e.x, ey = e.y;
-    if (!Number.isFinite(ex) || !Number.isFinite(ey)) continue;
+      const ex = e.x, ey = e.y;
+      if (!Number.isFinite(ex) || !Number.isFinite(ey)) continue;
 
-    let dx = ex - this.x, dy = ey - this.y, d2 = dx*dx + dy*dy;
+      let dx = ex - this.x, dy = ey - this.y;
+      let d2 = dx * dx + dy * dy;
 
-    if (d2 > r2) {
-      const looksTile = 
-      ex >= 0 && ey >= 0 &&
-      ex < GRID_COLS && ey < GRID_ROWS &&
-      Math.abs(ex - Math.round(ex)) < 1e-3 &&
-      Math.abs(ey - Math.round(ey)) < 1e-3;
-    if (looksTile) {
-      const px = ex * TILE_SIZE + TILE_SIZE / 2;
-      const py = ey * TILE_SIZE + TILE_SIZE / 2;
-      dx = px - this.x; dy = py - this.y; d2 = dx*dx + dy*dy;
+      if (d2 > r2) {
+        // Fallback if enemy is reported in tile-space
+        const looksTile =
+          ex >= 0 && ey >= 0 &&
+          ex < GRID_COLS && ey < GRID_ROWS &&
+          Math.abs(ex - Math.round(ex)) < 1e-3 &&
+          Math.abs(ey - Math.round(ey)) < 1e-3;
+        if (looksTile) {
+          const px = ex * TILE_SIZE + TILE_SIZE / 2;
+          const py = ey * TILE_SIZE + TILE_SIZE / 2;
+          dx = px - this.x; dy = py - this.y;
+          d2 = dx * dx + dy * dy;
+        }
+      }
+
+      if (d2 <= r2 && d2 < bestD2) { best = e; bestD2 = d2; }
     }
+    return best;
   }
-  if (d2 <= r2 && d2 < bestD2) { best = e; bestD2 = d2; }
-  }
-  return best;
-}
 
   // Minimal, self-contained shooting
   update(dt, enemies, projectiles /* ignore grid/pool for stability */) {
@@ -157,15 +188,24 @@ export class Tower {
   }
 
   render(g) {
-    const left = this.x - TILE_SIZE / 2, top = this.y - TILE_SIZE / 2;
+    const left = this.x - TILE_SIZE / 2;
+    const top  = this.y - TILE_SIZE / 2;
+
     g.save();
-    g.fillStyle = this.color; g.fillRect(left, top, TILE_SIZE, TILE_SIZE);
-    g.strokeStyle = 'rgba(0,0,0,0.35)'; g.lineWidth = 2;
+    g.fillStyle = this.color;
+    g.fillRect(left, top, TILE_SIZE, TILE_SIZE);
+    g.strokeStyle = 'rgba(0,0,0,0.35)';
+    g.lineWidth = 2;
     g.strokeRect(Math.floor(left) + 0.5, Math.floor(top) + 0.5, TILE_SIZE - 1, TILE_SIZE - 1);
     g.restore();
 
-    // // Uncomment to see range:
-    // g.save(); g.strokeStyle = this.color; g.globalAlpha = 0.25;
-    // g.beginPath(); g.arc(this.x, this.y, this.range, 0, Math.PI * 2); g.stroke(); g.restore();
+    // // Uncomment to visualize range:
+    // g.save();
+    // g.strokeStyle = this.color;
+    // g.globalAlpha = 0.25;
+    // g.beginPath();
+    // g.arc(this.x, this.y, this.range, 0, Math.PI * 2);
+    // g.stroke();
+    // g.restore();
   }
 }

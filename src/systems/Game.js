@@ -95,6 +95,23 @@ export class Game {
     if (hi) { hi.style.pointerEvents = 'none'; hi.style.userSelect = 'none'; }
   }
 
+  // ---------- Money helpers (centralize updates) ----------
+  addMoney(amount) {
+    const a = Number.isFinite(amount) ? amount : 0;
+    this.money = Math.max(0, this.money + a);
+    // UI will refresh in update() → updateUI()
+    return this.money;
+  }
+
+  trySpend(cost) {
+    const c = Number.isFinite(cost) ? cost : 0;
+    if (this.money >= c) {
+      this.money -= c;
+      return true;
+    }
+    return false;
+  }
+
   // ---------- UI ----------
   selectTower(type) {
     this.selectedTowerType = type;
@@ -193,7 +210,17 @@ export class Game {
           this.soundManager.playGameOver();
         }
       }
+
+      // --- PAYOUT SAFEGUARD: award on death here as well (covers edge cases & pooled enemies) ---
       if (enemy.isDead) {
+        if (!enemy.reachedEnd && !enemy._rewardGranted) {
+          const reward = Math.max(0, enemy.reward | 0);
+          if (reward > 0) {
+            this.addMoney(reward);
+            enemy._rewardGranted = true;
+            this.soundManager.playEnemyDeath?.();
+          }
+        }
         this.enemyPool.release(enemy);
         this.enemies.splice(i, 1);
       }
@@ -230,7 +257,8 @@ export class Game {
               (p.target.hp <= 1e-6 ? (p.target.hp = 0, p.target.isDead = true, true) : false));
 
           if (killed && !p.target._rewardGranted) {
-            this.money += Math.max(0, p.target.reward | 0);
+            // use helper to ensure UI sync
+            this.addMoney(Math.max(0, p.target.reward | 0));
             p.target._rewardGranted = true;
             this.soundManager.playEnemyDeath();
           }
@@ -416,7 +444,13 @@ export class Game {
       const idx = this.towers.findIndex(t => t.tx === tx && t.ty === ty);
       if (idx >= 0) {
         const [sold] = this.towers.splice(idx, 1);
-        this.money += sold.getSellValue();
+        this.addMoney(sold.getSellValue()); // use helper
+        // keep price model in sync on sell
+        if (typeof Tower.registerSell === 'function') {
+          Tower.registerSell(sold.type);
+        } else if (Tower.towerCounts && sold.type in Tower.towerCounts) {
+          Tower.towerCounts[sold.type] = Math.max(0, (Tower.towerCounts[sold.type] | 0) - 1);
+        }
       }
       return;
     }
@@ -433,12 +467,17 @@ export class Game {
 
     const type = this.selectedTowerType;
     const cost = Tower.getNextTowerCost(type);
-    if (this.money < cost) return;
+    if (!this.trySpend(cost)) return; // use helper
 
-    this.money -= cost;
     const t = new Tower(tx, ty, type, cost);
     this.towers.push(t);
-    Tower.registerPurchase(type);
+
+    if (typeof Tower.registerPurchase === 'function') {
+      Tower.registerPurchase(type);
+    } else if (Tower.towerCounts && type in Tower.towerCounts) {
+      Tower.towerCounts[type] = (Tower.towerCounts[type] | 0) + 1;
+    }
+
     this.soundManager.playTowerPlace();
   }
 
