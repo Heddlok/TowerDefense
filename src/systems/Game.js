@@ -63,7 +63,7 @@ export class Game {
     this.pathMask = maskFromSteps(this.path);
 
     this.enemies = [];
-       this.towers = [];
+    this.towers = [];
     this.projectiles = [];
     this.hoverTile = null;
 
@@ -79,7 +79,7 @@ export class Game {
     this.spatialGrid = new SpatialGrid(canvas.width, canvas.height, TILE_SIZE);
     this.currentRenderScale = 1;
 
-    // Pools (kept allocated; we just won’t use the projectile one)
+    // Pools
     this.enemyPool = new ObjectPool(() => new Enemy(), (e) => e.reset(), 20);
     this.projectilePool = new ObjectPool(() => new Projectile(), (p) => p.reset(), 50);
 
@@ -95,7 +95,7 @@ export class Game {
     if (hi) { hi.style.pointerEvents = 'none'; hi.style.userSelect = 'none'; }
   }
 
-  // ---------- Money helpers (centralize updates) ----------
+  // ---------- Money helpers ----------
   addMoney(amount) {
     const a = Number.isFinite(amount) ? amount : 0;
     this.money = Math.max(0, this.money + a);
@@ -105,6 +105,17 @@ export class Game {
     const c = Number.isFinite(cost) ? cost : 0;
     if (this.money >= c) { this.money -= c; return true; }
     return false;
+  }
+
+  // ---------- Upgrade pricing ----------
+  getUpgradeCost(tower, stat) {
+    // Simple, readable formula: 25 base + 15 per current level
+    const base = 25, inc = 15;
+    const level =
+      stat === 'damage'   ? (tower.damageLevel   ?? 0) :
+      stat === 'range'    ? (tower.rangeLevel    ?? 0) :
+      stat === 'fireRate' ? (tower.fireRateLevel ?? 0) : 0;
+    return base + inc * level;
   }
 
   // ---------- UI ----------
@@ -143,21 +154,72 @@ export class Game {
     const btn = document.getElementById('soundToggleBtn');
     if (btn) btn.textContent = this._muted ? 'Sound: Off' : 'Sound: On';
   }
+
+  // Populate/refresh the upgrade panel from live state
+  showUpgradePanel(t = this.selectedTower) {
+    const p = document.getElementById('upgradePanel');
+    if (!p || !t) return;
+    p.style.display = 'block';
+
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
+
+    // Current stats
+    set('currentDamage', t.damage ?? 0);
+    set('currentRange',  Math.round(t.range ?? (TILE_SIZE*2)));
+    set('currentFireRate', (t.fireRate ?? 0).toFixed(2));
+    set('sellValue', t.getSellValue?.() ?? Math.floor((t.purchasePrice ?? 0) * 0.75));
+
+    // Costs
+    const dmgCost  = this.getUpgradeCost(t, 'damage');
+    const rngCost  = this.getUpgradeCost(t, 'range');
+    const frCost   = this.getUpgradeCost(t, 'fireRate');
+    set('damageCost', dmgCost);
+    set('rangeCost',  rngCost);
+    set('fireRateCost', frCost);
+
+    // Button states (visual-only)
+    const max = t.maxUpgradeLevel ?? 5;
+    const lockBtn = (btnId, unaffordableOrMax) => {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+      btn.classList.toggle('unaffordable', !!unaffordableOrMax);
+      btn.setAttribute('aria-disabled', unaffordableOrMax ? 'true' : 'false');
+    };
+    lockBtn('upgradeDamageBtn', (t.damageLevel   ?? 0) >= max || this.money < dmgCost);
+    lockBtn('upgradeRangeBtn',  (t.rangeLevel    ?? 0) >= max || this.money < rngCost);
+    lockBtn('upgradeFireRateBtn', (t.fireRateLevel ?? 0) >= max || this.money < frCost);
+  }
+  hideUpgradePanel() { const p = document.getElementById('upgradePanel'); if (p) p.style.display = 'none'; }
+
   upgradeTower(stat) {
     const t = this.selectedTower;
     if (!t) return;
+
+    const level =
+      stat === 'damage'   ? (t.damageLevel   ?? 0) :
+      stat === 'range'    ? (t.rangeLevel    ?? 0) :
+      stat === 'fireRate' ? (t.fireRateLevel ?? 0) : 0;
+
+    const max = t.maxUpgradeLevel ?? 5;
+    if (level >= max) { this.showUpgradePanel(t); return; }
+
+    const cost = this.getUpgradeCost(t, stat);
+    if (!this.trySpend(cost)) { this.showUpgradePanel(t); return; }
+
+    // Apply the upgrade
     if (typeof t.upgrade === 'function') t.upgrade(stat);
     else if (typeof t.tryUpgrade === 'function') t.tryUpgrade(stat);
     else {
-      if (stat === 'damage') t.damage = (t.damage ?? 5) + 1;
-      if (stat === 'range')  t.range  = (t.range  ?? (TILE_SIZE * 2)) + TILE_SIZE * 0.25;
-      if (stat === 'fireRate') t.fireRate = Math.max(0.05, (t.fireRate ?? 1) * 0.9);
+      if (stat === 'damage')   t.damage   = Math.round((t.damage ?? 5) * 1.25);
+      if (stat === 'range')   { t.range   = Math.round((t.range ?? (TILE_SIZE * 2)) * 1.10); t.range2 = t.range * t.range; }
+      if (stat === 'fireRate') t.fireRate = +((t.fireRate ?? 1) * 1.20).toFixed(3);
     }
+
+    // Feedback and refresh
+    this.soundManager.playShoot?.(); // light “tick” feedback
     this.showUpgradePanel(t);
     this.updateUI();
   }
-  showUpgradePanel() { const p = document.getElementById('upgradePanel'); if (p) p.style.display = 'block'; }
-  hideUpgradePanel() { const p = document.getElementById('upgradePanel'); if (p) p.style.display = 'none'; }
 
   // ---------- Placement ----------
   isOnPathTile(tx, ty) { return this.pathMask.has(_k(tx, ty)); }
@@ -221,7 +283,7 @@ export class Game {
       }
     }
 
-    // Keep grid up-to-date (even if we don’t use it for targeting now)
+    // Keep grid up-to-date
     this.spatialGrid.clear();
     for (const e of this.enemies) this.spatialGrid.insert(e);
 
@@ -353,12 +415,12 @@ export class Game {
     const stats = this.perfMonitor.getStats();
     setText('fps', stats.fps);
 
-    // ---- Match your main.js/HTML: dataset-based tower buttons ----
+    // ---- Tower purchase buttons (visual-only disable) ----
     const btnFor = (type) =>
       document.querySelector(`.tower-btn[data-tower="${type}"]`) ||
-      document.getElementById(`${type}TowerBtn`); // fallback if IDs exist too
+      document.getElementById(`${type}TowerBtn`);
 
-    const syncBtn = (type) => {
+    const syncBuyBtn = (type) => {
       const btn = btnFor(type);
       if (!btn) return;
       const c = Tower.getNextTowerCost(type);
@@ -367,27 +429,13 @@ export class Game {
       const unaffordable = this.gameOver || this.money < c;
 
       btn.textContent = `${label} (${c}) [${n} built]`;
-
-      // IMPORTANT: don't flip the real disabled flag every frame (it cancels clicks)
       btn.classList.toggle('unaffordable', unaffordable);
       btn.setAttribute('aria-disabled', unaffordable ? 'true' : 'false');
-      // btn.disabled = unaffordable; // ← removed on purpose
     };
+    syncBuyBtn('basic'); syncBuyBtn('rapid'); syncBuyBtn('heavy');
 
-    syncBtn('basic'); syncBtn('rapid'); syncBtn('heavy');
-
-    const costEl = document.getElementById('cost');
-    if (costEl) {
-      costEl.textContent = this.selectedTowerType
-        ? `Cost: ${Tower.getNextTowerCost(this.selectedTowerType)}`
-        : 'Cost: —';
-    }
-    const bc = document.getElementById('basicCost');
-    const rc = document.getElementById('rapidCost');
-    const hc = document.getElementById('heavyCost');
-    if (bc) bc.textContent = String(Tower.getNextTowerCost('basic'));
-    if (rc) rc.textContent = String(Tower.getNextTowerCost('rapid'));
-    if (hc) hc.textContent = String(Tower.getNextTowerCost('heavy'));
+    // Keep the upgrade panel live with money changes
+    if (this.selectedTower && this.upgradeMode) this.showUpgradePanel(this.selectedTower);
   }
 
   screenToTile(e) {
@@ -538,7 +586,7 @@ export class Game {
         if (typeof enemy.setPath === 'function') enemy.setPath(this.path);
         else enemy.path = this.path;
 
-        // hard reset payout guard for pooled enemies
+        // hard reset payout guard
         enemy._rewardGranted = false;
 
         this.enemies.push(enemy);

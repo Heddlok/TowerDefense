@@ -12,11 +12,34 @@ main { flex: 1; display: grid; grid-template-columns: 200px 1fr; }
 .sidebar .tower-btn { width: 100%; margin-bottom: 8px; }
 .canvas-wrap { position: relative; display: flex; align-items: center; justify-content: center; padding: 12px; background: #0d1117; }
 canvas { background: #0b0f14; border: 2px solid #30363d; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+
 button { background: linear-gradient(135deg, #238636, #2ea043); color: #fff; border: 1px solid #2ea043; border-radius: 6px; padding: 8px 10px; cursor: pointer; font-weight: 500; transition: all 0.2s; }
 button:hover:not(:disabled) { background: linear-gradient(135deg, #2ea043, #238636); transform: translateY(-1px); box-shadow: 0 2px 8px rgba(46,160,67,0.3); }
 button:disabled { opacity: 0.6; cursor: not-allowed; transform: none; box-shadow: none; }
 button.secondary { background: linear-gradient(135deg, #30363d, #484f58); border-color: #484f58; }
 button.secondary:hover:not(:disabled) { background: linear-gradient(135deg, #484f58, #30363d); }
+
+/* ── Visual-only affordability state (buttons remain clickable) ───────────── */
+.sidebar .tower-btn.unaffordable,
+.sidebar .tower-btn[aria-disabled="true"] {
+  background: linear-gradient(135deg, #30363d, #484f58);
+  border-color: #484f58;
+  color: #c9d1d9;
+  opacity: 0.85;
+  filter: grayscale(0.6) brightness(0.95);
+  cursor: not-allowed;
+}
+
+/* Lock the grey style on hover/active (since not truly disabled) */
+.sidebar .tower-btn.unaffordable:hover,
+.sidebar .tower-btn[aria-disabled="true"]:hover,
+.sidebar .tower-btn.unaffordable:active,
+.sidebar .tower-btn[aria-disabled="true"]:active {
+  background: linear-gradient(135deg, #30363d, #484f58);
+  transform: none;
+  box-shadow: none;
+}
+
 #hoverInfo { position: absolute; pointer-events: none; background: rgba(0,0,0,0.85); padding: 6px 8px; border-radius: 6px; font-size: 12px; display: none; color: #f0f6fc; border: 1px solid #30363d; }
 footer { padding: 10px 16px; border-top: 1px solid #30363d; background: #161b22; }
 footer a { color: #58a6ff; text-decoration: none; }
@@ -82,4 +105,3 @@ footer a:hover { text-decoration: underline; }
   color: #f85149; 
   font-weight: bold; 
 }
-
