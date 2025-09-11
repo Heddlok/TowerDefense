@@ -6,7 +6,7 @@ import { Projectile } from './OptimizedProjectile.js';
 const RANGE_TWEAK = 1.30;
 
 // Range defined in tiles, converted once to pixels
-const RANGE_TILES = { basic: 1.00, rapid: 0.80, heavy: 0.60 };
+const RANGE_TILES = { basic: 1.25, rapid: 0.95, heavy: 0.80 };
 const RANGE_PX = {
   basic: Math.round(RANGE_TILES.basic * TILE_SIZE * RANGE_TWEAK),
   rapid: Math.round(RANGE_TILES.rapid * TILE_SIZE * RANGE_TWEAK),
