@@ -192,7 +192,7 @@ export class Game {
     };
     lockBtn('upgradeDamageBtn', (t.damageLevel   ?? 0) >= max || this.money < dmgCost);
     lockBtn('upgradeRangeBtn',  (t.rangeLevel    ?? 0) >= max || this.money < rngCost);
-    lockBtn('upgradeFireRateBtn', (t.fireRateLevel ?? 0) >= max || this.money < frCost);
+    lockBtn('upgradeFireRateBtn', this.money < frCost);
   }
   hideUpgradePanel() { const p = document.getElementById('upgradePanel'); if (p) p.style.display = 'none'; }
 
@@ -207,6 +207,11 @@ export class Game {
 
     const max = t.maxUpgradeLevel ?? 5;
     if (level >= max) { this.showUpgradePanel(t); return; }
+
+    if (stat !== 'fireRate' && level >= max) {
+      this.showUpgradePanel(t);
+      return;
+    }
 
     const cost = this.getUpgradeCost(t, stat);
     if (!this.trySpend(cost)) { this.showUpgradePanel(t); return; }
