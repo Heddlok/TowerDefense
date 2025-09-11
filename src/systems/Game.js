@@ -611,9 +611,10 @@ export class Game {
   
         // Very slow, very tanky, big payout
         const tier = Math.floor(this.wave / 5); // 1 at wave 5, 2 at 10, etc.
-        scaling.hpMul *= (5 + 8 * (tier - 1)); // 5x at wave 5, 13x at wave 10, …
+        scaling.hpMul *= (3.5 + 1.8 * (tier - 1)); // 3.5x at wave 5, 4.7x at wave 10, …
         scaling.speedMul *= 0.53;               // very slow
         scaling.rewardMul *= 30;                // juicy reward
+        scaling.hpMul = Math.min(scaling.hpMul, 9) // never scale higher than 9x same wave tank health
       }
   
       let weights;
