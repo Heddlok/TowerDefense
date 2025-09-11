@@ -200,12 +200,12 @@ export class Tower {
     g.restore();
 
     // // Uncomment to visualize range:
-    // g.save();
-    // g.strokeStyle = this.color;
-    // g.globalAlpha = 0.25;
-    // g.beginPath();
-    // g.arc(this.x, this.y, this.range, 0, Math.PI * 2);
-    // g.stroke();
-    // g.restore();
+    g.save();
+    g.strokeStyle = this.color;
+    g.globalAlpha = 0.25;
+    g.beginPath();
+    g.arc(this.x, this.y, this.range, 0, Math.PI * 2);
+    g.stroke();
+    g.restore();
   }
 }
