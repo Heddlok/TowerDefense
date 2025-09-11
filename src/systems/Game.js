@@ -56,6 +56,7 @@ export class Game {
     this.phase = 'planning'; // 'planning' | 'combat'
     this.planningTime = 5.0;
     this.spawning = false;
+    this.isBossWave = false;
 
     // Track wave spawn accounting for "enemies left" UI
     this.waveTotalToSpawn = 0; // total scheduled for this wave
@@ -125,7 +126,7 @@ export class Game {
   // ---------- UI ----------
   selectTower(type) {
     this.selectedTowerType = type;
-    this.sellMode = false;
+       this.sellMode = false;
     this.upgradeMode = false;
     this.selectedTower = null;
     this.updateUI();
@@ -255,6 +256,7 @@ export class Game {
       if (!this.spawning && this.enemies.length === 0) {
         this.phase = 'planning';
         this.planningTime = 5.0;
+        this.isBossWave = false; // clear boss flag after wave ends
       }
     }
 
@@ -370,7 +372,21 @@ export class Game {
 
     // Entities
     for (const t of this.towers) t.render(g);
-    for (const e of this.enemies) e.render(g);
+    for (const e of this.enemies) {
+      e.render(g);
+
+      // Boss glow overlay
+      if (e.isBoss) {
+        g.save();
+        g.strokeStyle = 'rgba(210, 153, 34, 0.65)'; // warm gold
+        g.lineWidth = 3;
+        const r = 14; // tweak to match your enemy size
+        g.beginPath();
+        g.arc(e.x, e.y, r, 0, Math.PI * 2);
+        g.stroke();
+        g.restore();
+      }
+    }
 
     // Safe projectile render
     for (const p of this.projectiles) {
@@ -384,6 +400,24 @@ export class Game {
         g.fill();
         g.restore();
       }
+    }
+
+    // Boss banner (during combat on boss waves)
+    if (this.phase === 'combat' && this.isBossWave) {
+      g.save();
+      g.globalAlpha = 0.9;
+      g.fillStyle = '#0e1520';
+      const bw = 280, bh = 40;
+      g.fillRect((this.canvas.width - bw)/2, 12, bw, bh);
+      g.strokeStyle = '#d29922';
+      g.lineWidth = 2;
+      g.strokeRect((this.canvas.width - bw)/2 + 0.5, 12.5, bw - 1, bh - 1);
+      g.fillStyle = '#ffd36b';
+      g.font = 'bold 22px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('BOSS WAVE', this.canvas.width/2, 12 + bh/2);
+      g.restore();
     }
 
     // Hover
@@ -412,6 +446,11 @@ export class Game {
     return Math.max(0, remainingToSpawn + this.enemies.length);
   }
 
+  // ---- NEW: next wave boss helper
+  isNextWaveBoss() {
+    return ((this.wave + 1) % 5) === 0;
+  }
+
   updateUI() {
     const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
     setText('money', this.money);
@@ -421,9 +460,16 @@ export class Game {
     setText('sellModeBtn',    `Sell: ${this.sellMode ? 'On' : 'Off'}`);
 
     const planningEl = document.getElementById('planning');
-    if (planningEl) planningEl.textContent = this.phase === 'planning' ? `${Math.max(0, this.planningTime).toFixed(1)}s` : '—';
+    if (planningEl) {
+      if (this.phase === 'planning') {
+        const t = `${Math.max(0, this.planningTime).toFixed(1)}s`;
+        planningEl.textContent = this.isNextWaveBoss() ? `BOSS in ${t}` : t;
+      } else {
+        planningEl.textContent = '—';
+      }
+    }
 
-    // ⬇️ Replaced FPS with Enemies Left in Wave
+    // Enemies Left in Wave (replacing FPS)
     setText('enemyCount', this.getEnemiesLeftInWave());
 
     // ---- Tower purchase buttons (visual-only disable) ----
@@ -535,25 +581,45 @@ export class Game {
       this.phase = 'combat';
       this.wave += 1;
       this.soundManager.playWaveStart();
-
+  
       const s = getWaveScaling?.(this.wave) || {};
       const scaling = {
         hpMul:     Number.isFinite(s.hpMul)     ? s.hpMul     : 1,
         speedMul:  Number.isFinite(s.speedMul)  ? s.speedMul  : 1,
         rewardMul: Number.isFinite(s.rewardMul) ? s.rewardMul : 1,
       };
-
+  
       const p = getWavePlan?.(this.wave) || {};
       const plan = {
         count:      Number.isFinite(p.count)      ? p.count      : 10,
         interval:   Number.isFinite(p.interval)   ? p.interval   : 1.0,
         burstBonus: Number.isFinite(p.burstBonus) ? p.burstBonus : 0,
       };
+  
+      // 👉 NEW: Boss wave every 5 rounds
+      const isBossWave = (this.wave % 5 === 0);
+      this.isBossWave = isBossWave;
 
+      if (isBossWave) {
+        // Optional: boss intro sting
+        this.soundManager.playBossIntro?.();
+
+        // One enemy only
+        plan.count = 1;
+        plan.interval = 1.0;
+        plan.burstBonus = 0;
+  
+        // Very slow, very tanky, big payout
+        const tier = Math.floor(this.wave / 5); // 1 at wave 5, 2 at 10, etc.
+        scaling.hpMul *= (25 + 8 * (tier - 1)); // 25x at wave 5, 33x at wave 10, …
+        scaling.speedMul *= 0.35;               // very slow
+        scaling.rewardMul *= 10;                // juicy reward
+      }
+  
       let weights;
       if (this.wave <= 3) {
         weights = { basic: 1, fast: 0, tank: 0 };
-      } else {
+      } else if (!isBossWave) {
         const t = Math.max(0, this.wave - 3);
         let fastW = Math.min(0.40, 0.05 + 0.02 * t);
         let tankW = Math.min(0.35, 0.015 * Math.max(0, t - 2));
@@ -561,9 +627,10 @@ export class Game {
         const sum = basicW + fastW + tankW || 1;
         weights = { basic: basicW / sum, fast: fastW / sum, tank: tankW / sum };
       }
-
+  
       const pickType = () => {
         if (this.wave <= 3) return 'basic';
+        if (isBossWave)     return 'tank'; // boss uses tank base stats
         const a = Math.max(0, weights.basic || 0);
         const b = Math.max(0, weights.fast  || 0);
         const c = Math.max(0, weights.tank  || 0);
@@ -571,50 +638,52 @@ export class Game {
         const r = Math.random() * sum;
         return (r < a) ? 'basic' : (r < a + b) ? 'fast' : 'tank';
       };
-
+  
       const totalToSpawn = Math.max(0, (plan.count || 0) + (plan.burstBonus || 0));
-
-      // record totals for "enemies left" UI
+  
+      // Accounting for "Enemies Left" UI
       this.waveTotalToSpawn = totalToSpawn;
       this.waveSpawned = 0;
-
+  
       if (totalToSpawn === 0) {
         this.spawning = false;
         this.phase = 'planning';
         this.planningTime = 5.0;
         return;
       }
-
+  
       let spawned = 0;
       this.spawning = true;
-
+  
       const spawnOne = () => {
         if (this.gameOver) { this.spawning = false; return; }
         if (spawned >= totalToSpawn) { this.spawning = false; return; }
-
+  
         let type = pickType();
         if (this.wave <= 3) type = 'basic';
-
+  
         const enemy = this.enemyPool.get();
-
+  
         if (enemy.init.length >= 3) enemy.init(type, scaling, this.path);
         else enemy.init(type, scaling);
         if (typeof enemy.setPath === 'function') enemy.setPath(this.path);
         else enemy.path = this.path;
-
-        // hard reset payout guard
-        enemy._rewardGranted = false;
-
+  
+        // Mark boss for VFX/UI
+        if (isBossWave) enemy.isBoss = true;
+  
+        enemy._rewardGranted = false; // payout guard reset
+  
         this.enemies.push(enemy);
         spawned++;
-        this.waveSpawned++; // keep class-level count in sync
-
+        this.waveSpawned++;
+  
         const jitter = (Math.random() * 0.12) - 0.06;
         const base = Number.isFinite(plan.interval) ? plan.interval : 1.0;
         const intervalSec = Math.max(0.10, base + jitter);
         setTimeout(spawnOne, intervalSec * 1000);
       };
-
+  
       spawnOne();
     } catch (err) {
       console.error('startWave failed:', err);
@@ -623,6 +692,7 @@ export class Game {
       this.planningTime = 5.0;
     }
   }
+  
 
   renderHover(g) {
     if (!this.hoverTile) return;
@@ -632,6 +702,12 @@ export class Game {
     g.lineWidth = 2;
     g.strokeRect(x * TILE_SIZE + 1, y * TILE_SIZE + 1, TILE_SIZE - 2, TILE_SIZE - 2);
     g.restore();
+  }
+
+  // ---- NEW: next wave boss helper
+  isNextWaveBoss() {
+    // Next wave is current+1 (since wave increments in startWave)
+    return ((this.wave + 1) % 5) === 0;
   }
 
   destroy() {
