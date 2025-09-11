@@ -94,7 +94,7 @@ export class Tower {
       this.range2 = this.range * this.range;
       return true;
     }
-    if (kind === 'fireRate' && this.fireRateLevel < this.maxUpgradeLevel) {
+    if (kind === 'fireRate') {
       this.fireRateLevel++;
       this.fireRate = +((this.fireRate * 1.20).toFixed(3));
       return true;
