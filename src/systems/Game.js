@@ -611,8 +611,8 @@ export class Game {
   
         // Very slow, very tanky, big payout
         const tier = Math.floor(this.wave / 5); // 1 at wave 5, 2 at 10, etc.
-        scaling.hpMul *= (15 + 8 * (tier - 1)); // 15x at wave 5, 23x at wave 10, …
-        scaling.speedMul *= 0.47;               // very slow
+        scaling.hpMul *= (5 + 8 * (tier - 1)); // 5x at wave 5, 13x at wave 10, …
+        scaling.speedMul *= 0.53;               // very slow
         scaling.rewardMul *= 30;                // juicy reward
       }
   
