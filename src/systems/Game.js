@@ -57,6 +57,10 @@ export class Game {
     this.planningTime = 5.0;
     this.spawning = false;
 
+    // Track wave spawn accounting for "enemies left" UI
+    this.waveTotalToSpawn = 0; // total scheduled for this wave
+    this.waveSpawned = 0;      // how many we've spawned so far
+
     // ---- Path setup ----
     this._cornerNodes = createPath();
     this.path = expandToOrthogonalPath(this._cornerNodes);
@@ -401,6 +405,13 @@ export class Game {
     if (stats.renderScale < 1.0) g.restore();
   }
 
+  // ---- NEW: compute total enemies left in this wave (alive + not-yet-spawned)
+  getEnemiesLeftInWave() {
+    if (this.phase !== 'combat' && !this.spawning) return 0;
+    const remainingToSpawn = Math.max(0, (this.waveTotalToSpawn | 0) - (this.waveSpawned | 0));
+    return Math.max(0, remainingToSpawn + this.enemies.length);
+  }
+
   updateUI() {
     const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
     setText('money', this.money);
@@ -412,8 +423,8 @@ export class Game {
     const planningEl = document.getElementById('planning');
     if (planningEl) planningEl.textContent = this.phase === 'planning' ? `${Math.max(0, this.planningTime).toFixed(1)}s` : '—';
 
-    const stats = this.perfMonitor.getStats();
-    setText('fps', stats.fps);
+    // ⬇️ Replaced FPS with Enemies Left in Wave
+    setText('enemyCount', this.getEnemiesLeftInWave());
 
     // ---- Tower purchase buttons (visual-only disable) ----
     const btnFor = (type) =>
@@ -562,6 +573,11 @@ export class Game {
       };
 
       const totalToSpawn = Math.max(0, (plan.count || 0) + (plan.burstBonus || 0));
+
+      // record totals for "enemies left" UI
+      this.waveTotalToSpawn = totalToSpawn;
+      this.waveSpawned = 0;
+
       if (totalToSpawn === 0) {
         this.spawning = false;
         this.phase = 'planning';
@@ -591,6 +607,7 @@ export class Game {
 
         this.enemies.push(enemy);
         spawned++;
+        this.waveSpawned++; // keep class-level count in sync
 
         const jitter = (Math.random() * 0.12) - 0.06;
         const base = Number.isFinite(plan.interval) ? plan.interval : 1.0;
