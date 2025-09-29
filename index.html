@@ -5,6 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Tower Defense - Portfolio</title>
     <link rel="stylesheet" href="styles.css" />
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#16213e" />
+    <meta name="description" content="A polished HTML5 Canvas tower defense game with multiple tower types, enemy varieties, and sound effects." />
+    <link rel="manifest" href="manifest.json" />
+    
+    <!-- iOS PWA Support -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Tower Defense" />
+    <link rel="apple-touch-icon" href="icons/icon-192x192.svg" />
+    
+    <!-- Windows PWA Support -->
+    <meta name="msapplication-TileColor" content="#16213e" />
+    <meta name="msapplication-TileImage" content="icons/icon-144x144.svg" />
   </head>
   <body>
     <div id="app">
@@ -62,5 +77,20 @@
     </div>
 
     <script type="module" src="src/main.js"></script>
+    
+    <!-- PWA Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then(registration => {
+              console.log('SW registered: ', registration);
+            })
+            .catch(registrationError => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+      }
+    </script>
   </body>
 </html>
